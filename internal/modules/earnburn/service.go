@@ -1,0 +1,468 @@
+package earnburn
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math"
+	"math/big"
+	"time"
+
+	"github.com/theluisbolivar/fidel-quick/internal/apperror"
+)
+
+const (
+	otpCodeLength     = 6
+	correctionWindow  = 2 * time.Hour
+	redemptionExpiry  = 1 * time.Hour
+)
+
+type Service struct {
+	repo  *PostgresRepository
+	cache Cache
+	log   *slog.Logger
+}
+
+func NewService(repo *PostgresRepository, cache Cache, log *slog.Logger) *Service {
+	return &Service{repo: repo, cache: cache, log: log}
+}
+
+// AddPoints calculates points from purchase amount and credits them.
+func (s *Service) AddPoints(ctx context.Context, req AddPointsReq) (*Transaction, error) {
+	program, err := s.repo.GetProgram(ctx, req.ClientID)
+	if err != nil {
+		// Try with the program ID if client-based lookup fails
+		return nil, fmt.Errorf("get program: %w", err)
+	}
+
+	points := int(math.Floor(req.Amount / float64(program.PointsRatio)))
+	if points <= 0 {
+		return nil, fmt.Errorf("monto insuficiente para acumular puntos (ratio: %d)", program.PointsRatio)
+	}
+
+	correctableUntil := time.Now().Add(correctionWindow)
+	tx := &Transaction{
+		ID:               generateUUID(),
+		ClientID:         req.ClientID,
+		ProgramID:        req.ProgramID,
+		CollaboratorID:   req.CollaboratorID,
+		Type:             "earn",
+		Amount:           points,
+		InvoiceURL:       req.InvoiceURL,
+		ManualEntry:      req.ManualEntry,
+		CorrectableUntil: &correctableUntil,
+	}
+
+	newBalance, err := s.repo.AddPointsTx(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("add points tx: %w", err)
+	}
+
+	tx.BalanceAfter = newBalance
+
+	s.log.Info("points.added",
+		"client_id", req.ClientID,
+		"amount", points,
+		"balance_after", newBalance,
+		"collaborator_id", req.CollaboratorID,
+	)
+
+	return tx, nil
+}
+
+// CheckBalance returns the current balance for a client.
+func (s *Service) CheckBalance(ctx context.Context, clientID, programID string) (int, error) {
+	return s.repo.GetBalance(ctx, clientID, programID)
+}
+
+// ListTransactions returns recent transactions.
+func (s *Service) ListTransactions(ctx context.Context, clientID, programID string, limit int) ([]Transaction, error) {
+	return s.repo.ListTransactions(ctx, clientID, programID, limit)
+}
+
+// ListCorrectableTransactions returns transactions within the 2h correction window.
+func (s *Service) ListCorrectableTransactions(ctx context.Context, clientID string) ([]Transaction, error) {
+	return s.repo.ListCorrectableTransactions(ctx, clientID)
+}
+
+// UpdatePoints applies a correction to an existing transaction.
+func (s *Service) UpdatePoints(ctx context.Context, req UpdatePointsReq) (*Transaction, error) {
+	original, err := s.repo.GetTransaction(ctx, req.TransactionID)
+	if err != nil {
+		return nil, fmt.Errorf("get original transaction: %w", err)
+	}
+
+	if original.CorrectableUntil == nil || time.Now().After(*original.CorrectableUntil) {
+		return nil, fmt.Errorf("ventana de correccion expirada")
+	}
+
+	delta := req.NewAmount - original.Amount
+
+	tx := &Transaction{
+		ID:                    generateUUID(),
+		ClientID:              original.ClientID,
+		ProgramID:             original.ProgramID,
+		CollaboratorID:        req.CollaboratorID,
+		Type:                  "adjustment",
+		Amount:                delta,
+		Description:           req.TransactionID, // reference to original
+		CorrectionReason:      req.CorrectionReason,
+		CorrectionEvidenceURL: req.CorrectionEvidenceURL,
+	}
+
+	newBalance, err := s.repo.AdjustPointsTx(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("adjust points: %w", err)
+	}
+
+	tx.BalanceAfter = newBalance
+
+	s.log.Info("points.adjusted",
+		"client_id", original.ClientID,
+		"original_tx", req.TransactionID,
+		"delta", delta,
+		"balance_after", newBalance,
+	)
+
+	return tx, nil
+}
+
+// ListRewards returns rewards the client can afford.
+func (s *Service) ListRewards(ctx context.Context, customerID, programID string, maxPoints int) ([]Reward, error) {
+	return s.repo.ListRewards(ctx, customerID, programID, maxPoints)
+}
+
+// RequestRedemption creates a pending redemption with a temporary code.
+func (s *Service) RequestRedemption(ctx context.Context, req RedemptionReq) (*Redemption, string, error) {
+	reward, err := s.repo.GetReward(ctx, req.RewardID)
+	if err != nil {
+		return nil, "", fmt.Errorf("get reward: %w", err)
+	}
+
+	balance, err := s.repo.GetBalance(ctx, req.ClientID, req.ProgramID)
+	if err != nil {
+		return nil, "", fmt.Errorf("get balance: %w", err)
+	}
+
+	if balance < reward.PointsCost {
+		return nil, "", fmt.Errorf("puntos insuficientes: tienes %d, necesitas %d", balance, reward.PointsCost)
+	}
+
+	code := generateCode(otpCodeLength)
+	rd := &Redemption{
+		ID:          generateUUID(),
+		ClientID:    req.ClientID,
+		RewardID:    req.RewardID,
+		ProgramID:   req.ProgramID,
+		Code:        code,
+		Status:      "pending",
+		PointsSpent: reward.PointsCost,
+		ExpiresAt:   time.Now().Add(redemptionExpiry),
+	}
+
+	tx := &Transaction{
+		ID:        generateUUID(),
+		ClientID:  req.ClientID,
+		ProgramID: req.ProgramID,
+		Type:      "burn",
+		Amount:    -reward.PointsCost,
+		Description: fmt.Sprintf("Canje: %s", reward.Name),
+	}
+
+	if err := s.repo.BurnPointsTx(ctx, tx, rd); err != nil {
+		return nil, "", fmt.Errorf("burn points: %w", err)
+	}
+
+	// Store OTP in Redis for fast lookup
+	otpData := &OTPData{
+		ClientID:   req.ClientID,
+		CustomerID: reward.CustomerID,
+		Type:       "redemption",
+		Metadata: map[string]string{
+			"reward_id":    req.RewardID,
+			"reward_name":  reward.Name,
+			"points_spent": fmt.Sprintf("%d", reward.PointsCost),
+		},
+	}
+	if err := s.cache.SetOTP(ctx, code, otpData); err != nil {
+		s.log.Error("failed to cache redemption otp", "error", err)
+		// Non-fatal: Postgres is source of truth
+	}
+
+	s.log.Info("redemption.requested",
+		"client_id", req.ClientID,
+		"reward", reward.Name,
+		"code", code,
+	)
+
+	return rd, code, nil
+}
+
+// ConfirmRedemption validates the code and marks the redemption as confirmed.
+func (s *Service) ConfirmRedemption(ctx context.Context, code, collaboratorID string) (*Redemption, error) {
+	// Try Redis first (fast path)
+	otpData, err := s.cache.ConsumeOTP(ctx, code)
+	if err != nil {
+		s.log.Error("redis consume failed, falling back to postgres", "error", err)
+	}
+
+	if otpData != nil && otpData.Type != "redemption" {
+		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
+	}
+
+	// Always confirm via Postgres (source of truth)
+	rd, err := s.repo.GetRedemptionByCode(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("codigo de canje no encontrado")
+	}
+
+	if rd.Status != "pending" {
+		return nil, fmt.Errorf("canje ya fue %s", rd.Status)
+	}
+
+	if time.Now().After(rd.ExpiresAt) {
+		return nil, fmt.Errorf("codigo expirado")
+	}
+
+	if err := s.repo.ConfirmRedemption(ctx, rd.ID, collaboratorID); err != nil {
+		return nil, fmt.Errorf("confirm redemption: %w", err)
+	}
+
+	rd.Status = "confirmed"
+	rd.ConfirmedBy = collaboratorID
+
+	s.log.Info("redemption.confirmed",
+		"code", code,
+		"collaborator_id", collaboratorID,
+	)
+
+	return rd, nil
+}
+
+// RequestLoadPointsCode generates a temporary code for client→collaborator handoff.
+func (s *Service) RequestLoadPointsCode(ctx context.Context, clientID, customerID string) (string, error) {
+	code := generateCode(otpCodeLength)
+	otpData := &OTPData{
+		ClientID:   clientID,
+		CustomerID: customerID,
+		Type:       "load_points",
+		Metadata:   map[string]string{},
+	}
+	if err := s.cache.SetOTP(ctx, code, otpData); err != nil {
+		return "", fmt.Errorf("set load points otp: %w", err)
+	}
+	return code, nil
+}
+
+// ValidateLoadPointsCode checks and consumes the load points code.
+func (s *Service) ValidateLoadPointsCode(ctx context.Context, code string) (*OTPData, error) {
+	data, err := s.cache.ConsumeOTP(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("consume load points code: %w", err)
+	}
+	if data == nil {
+		return nil, fmt.Errorf("codigo invalido o expirado")
+	}
+	if data.Type != "load_points" {
+		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
+	}
+	return data, nil
+}
+
+// RequestIdentityOTP generates an identity OTP for a client.
+func (s *Service) RequestIdentityOTP(ctx context.Context, clientID, customerID string) (string, error) {
+	// Invalidate previous OTP
+	oldCode, _ := s.cache.GetActiveIdentity(ctx, clientID)
+	if oldCode != "" {
+		s.cache.DeleteOTP(ctx, oldCode)
+		s.cache.DeleteActiveIdentity(ctx, clientID)
+	}
+
+	code := generateCode(otpCodeLength)
+	otpData := &OTPData{
+		ClientID:   clientID,
+		CustomerID: customerID,
+		Type:       "identity",
+		Metadata:   map[string]string{},
+	}
+	if err := s.cache.SetOTP(ctx, code, otpData); err != nil {
+		return "", fmt.Errorf("set identity otp: %w", err)
+	}
+	if err := s.cache.SetActiveIdentity(ctx, clientID, code); err != nil {
+		s.log.Error("failed to set active identity tracker", "error", err)
+	}
+	return code, nil
+}
+
+// ValidateIdentityOTP checks an identity OTP (multi-use, does not consume).
+func (s *Service) ValidateIdentityOTP(ctx context.Context, code string) (*OTPData, error) {
+	data, err := s.cache.GetOTP(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("get identity otp: %w", err)
+	}
+	if data == nil {
+		return nil, fmt.Errorf("codigo invalido o expirado")
+	}
+	if data.Type != "identity" {
+		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
+	}
+	return data, nil
+}
+
+// GetClientName returns the client's name.
+func (s *Service) GetClientName(ctx context.Context, clientID string) (string, error) {
+	return s.repo.GetClientName(ctx, clientID)
+}
+
+// SubmitFeedback stores client feedback.
+func (s *Service) SubmitFeedback(ctx context.Context, clientID, customerID, message string) error {
+	return s.repo.CreateFeedback(ctx, clientID, customerID, message)
+}
+
+// --- Passthroughs for module.go ---
+
+func (s *Service) GetProgram(ctx context.Context, customerID string) (*Program, error) {
+	p, err := s.repo.GetProgram(ctx, customerID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperror.NotFound("programa no encontrado", err)
+		}
+		return nil, apperror.Internal("error al buscar programa", err)
+	}
+	return p, nil
+}
+
+func (s *Service) GetReward(ctx context.Context, id string) (*Reward, error) {
+	r, err := s.repo.GetReward(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperror.NotFound("recompensa no encontrada", err)
+		}
+		return nil, apperror.Internal("error al buscar recompensa", err)
+	}
+	return r, nil
+}
+
+// --- Admin CRUD ---
+
+func (s *Service) ListPrograms(ctx context.Context) ([]Program, error) {
+	programs, err := s.repo.ListPrograms(ctx)
+	if err != nil {
+		return nil, apperror.Internal("error al listar programas", err)
+	}
+	return programs, nil
+}
+
+func (s *Service) CreateProgram(ctx context.Context, p *Program) error {
+	if err := s.repo.CreateProgram(ctx, p); err != nil {
+		return apperror.Internal("error al crear programa", err)
+	}
+	return nil
+}
+
+func (s *Service) UpdateProgram(ctx context.Context, p *Program) error {
+	if err := s.repo.UpdateProgram(ctx, p); err != nil {
+		return apperror.Internal("error al actualizar programa", err)
+	}
+	return nil
+}
+
+func (s *Service) GetCustomer(ctx context.Context, id string) (*Customer, error) {
+	c, err := s.repo.GetCustomer(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperror.NotFound("cliente no encontrado", err)
+		}
+		return nil, apperror.Internal("error al buscar cliente", err)
+	}
+	return c, nil
+}
+
+func (s *Service) CreateCustomer(ctx context.Context, c *Customer) error {
+	if err := s.repo.CreateCustomer(ctx, c); err != nil {
+		return apperror.Internal("error al crear cliente", err)
+	}
+	return nil
+}
+
+func (s *Service) UpdateCustomer(ctx context.Context, c *Customer) error {
+	if err := s.repo.UpdateCustomer(ctx, c); err != nil {
+		return apperror.Internal("error al actualizar cliente", err)
+	}
+	return nil
+}
+
+func (s *Service) CreateCollaborator(ctx context.Context, c *Collaborator) error {
+	if err := s.repo.CreateCollaborator(ctx, c); err != nil {
+		return apperror.Internal("error al crear colaborador", err)
+	}
+	return nil
+}
+
+func (s *Service) ListCollaborators(ctx context.Context, customerID string) ([]Collaborator, error) {
+	collabs, err := s.repo.ListCollaborators(ctx, customerID)
+	if err != nil {
+		return nil, apperror.Internal("error al listar colaboradores", err)
+	}
+	return collabs, nil
+}
+
+func (s *Service) ListAllRewards(ctx context.Context, programID string) ([]Reward, error) {
+	rewards, err := s.repo.ListAllRewards(ctx, programID)
+	if err != nil {
+		return nil, apperror.Internal("error al listar recompensas", err)
+	}
+	return rewards, nil
+}
+
+func (s *Service) CreateRewardAdmin(ctx context.Context, programID string, r *Reward) error {
+	if err := s.repo.CreateRewardAdmin(ctx, programID, r); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apperror.NotFound("programa no encontrado", err)
+		}
+		return apperror.Internal("error al crear recompensa", err)
+	}
+	return nil
+}
+
+func (s *Service) UpdateRewardAdmin(ctx context.Context, r *Reward) error {
+	if err := s.repo.UpdateRewardAdmin(ctx, r); err != nil {
+		return apperror.Internal("error al actualizar recompensa", err)
+	}
+	return nil
+}
+
+func (s *Service) ListFeedback(ctx context.Context, customerID string) ([]FeedbackEntry, error) {
+	entries, err := s.repo.ListFeedback(ctx, customerID)
+	if err != nil {
+		return nil, apperror.Internal("error al listar feedback", err)
+	}
+	return entries, nil
+}
+
+func (s *Service) GetBalance(ctx context.Context, clientID, programID string) (int, error) {
+	return s.repo.GetBalance(ctx, clientID, programID)
+}
+
+// generateCode creates a random alphanumeric code.
+func generateCode(length int) string {
+	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no I, O, 0, 1
+	code := make([]byte, length)
+	for i := range code {
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		code[i] = chars[n.Int64()]
+	}
+	return string(code)
+}
+
+// generateUUID creates a v4 UUID string.
+func generateUUID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}

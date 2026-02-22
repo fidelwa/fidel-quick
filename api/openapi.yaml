@@ -1,0 +1,653 @@
+openapi: 3.0.3
+info:
+  title: Fidel Quick API
+  description: API interna para gestión del sistema de fidelidad earn-burn.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: updated
+
+    IDResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+
+    # --- Programs ---
+    Program:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          example: earn_burn
+        name:
+          type: string
+          example: Programa Cafe Roma
+        points_ratio:
+          type: integer
+          description: Puntos otorgados por cada unidad monetaria gastada
+          example: 1000
+        active:
+          type: boolean
+
+    CreateProgramRequest:
+      type: object
+      required: [customer_id, type, name]
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          example: earn_burn
+        name:
+          type: string
+          example: Programa Cafe Roma
+        points_ratio:
+          type: integer
+          description: Default 1000 si no se especifica
+          example: 1000
+
+    UpdateProgramRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        points_ratio:
+          type: integer
+        active:
+          type: boolean
+
+    # --- Rewards ---
+    Reward:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Cafe gratis
+        description:
+          type: string
+        points_cost:
+          type: integer
+          example: 500
+        active:
+          type: boolean
+
+    CreateRewardRequest:
+      type: object
+      required: [name, points_cost]
+      properties:
+        name:
+          type: string
+          example: Cafe gratis
+        description:
+          type: string
+        points_cost:
+          type: integer
+          example: 500
+
+    UpdateRewardRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        points_cost:
+          type: integer
+        active:
+          type: boolean
+
+    # --- Customers ---
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Cafe Roma
+        slug:
+          type: string
+          example: cafe-roma
+        phone:
+          type: string
+          example: "5491112345678"
+        address:
+          type: string
+        logo_url:
+          type: string
+        description:
+          type: string
+        welcome_message:
+          type: string
+        active:
+          type: boolean
+
+    CreateCustomerRequest:
+      type: object
+      required: [name, slug, phone]
+      properties:
+        name:
+          type: string
+          example: Cafe Roma
+        slug:
+          type: string
+          example: cafe-roma
+        phone:
+          type: string
+          example: "5491112345678"
+        address:
+          type: string
+        logo_url:
+          type: string
+        description:
+          type: string
+        welcome_message:
+          type: string
+
+    UpdateCustomerRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        logo_url:
+          type: string
+        description:
+          type: string
+        welcome_message:
+          type: string
+        active:
+          type: boolean
+
+    # --- Collaborators ---
+    Collaborator:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Juan Perez
+        phone:
+          type: string
+          example: "5491198765432"
+        hash_id:
+          type: string
+          description: Identificador corto para el colaborador
+          example: JP001
+        active:
+          type: boolean
+
+    CreateCollaboratorRequest:
+      type: object
+      required: [name, phone, hash_id]
+      properties:
+        name:
+          type: string
+          example: Juan Perez
+        phone:
+          type: string
+          example: "5491198765432"
+        hash_id:
+          type: string
+          example: JP001
+
+    # --- Balance & Transactions ---
+    Balance:
+      type: object
+      properties:
+        client_id:
+          type: string
+          format: uuid
+        program_id:
+          type: string
+          format: uuid
+        balance:
+          type: integer
+          example: 3500
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [earn, burn, adjustment]
+        amount:
+          type: integer
+          example: 500
+        balance_after:
+          type: integer
+          example: 3500
+        created_at:
+          type: string
+          format: date-time
+
+    # --- Feedback ---
+    Feedback:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        message:
+          type: string
+        client_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+paths:
+  # ========== Programs ==========
+  /programs:
+    get:
+      tags: [Programs]
+      summary: Listar todos los programas
+      operationId: listPrograms
+      responses:
+        "200":
+          description: Lista de programas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Program"
+        "401":
+          description: No autorizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      tags: [Programs]
+      summary: Crear un programa de fidelidad
+      operationId: createProgram
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProgramRequest"
+      responses:
+        "201":
+          description: Programa creado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IDResponse"
+        "400":
+          description: Datos invalidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /programs/{id}:
+    put:
+      tags: [Programs]
+      summary: Actualizar un programa
+      operationId: updateProgram
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProgramRequest"
+      responses:
+        "200":
+          description: Programa actualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+
+  # ========== Rewards ==========
+  /programs/{id}/rewards:
+    get:
+      tags: [Rewards]
+      summary: Listar recompensas de un programa
+      operationId: listRewards
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID del programa
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Lista de recompensas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Reward"
+
+    post:
+      tags: [Rewards]
+      summary: Crear una recompensa
+      operationId: createReward
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID del programa
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRewardRequest"
+      responses:
+        "201":
+          description: Recompensa creada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IDResponse"
+        "404":
+          description: Programa no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /programs/{id}/rewards/{reward_id}:
+    put:
+      tags: [Rewards]
+      summary: Actualizar una recompensa
+      operationId: updateReward
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID del programa
+          schema:
+            type: string
+            format: uuid
+        - name: reward_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRewardRequest"
+      responses:
+        "200":
+          description: Recompensa actualizada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+
+  # ========== Client Balance & Transactions ==========
+  /programs/{id}/clients/{client_id}/balance:
+    get:
+      tags: [Clients]
+      summary: Consultar balance de puntos de un cliente
+      operationId: getClientBalance
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID del programa
+          schema:
+            type: string
+            format: uuid
+        - name: client_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Balance del cliente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Balance"
+
+  /programs/{id}/clients/{client_id}/transactions:
+    get:
+      tags: [Clients]
+      summary: Listar transacciones de puntos de un cliente
+      operationId: getClientTransactions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID del programa
+          schema:
+            type: string
+            format: uuid
+        - name: client_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Lista de transacciones (max 50)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Transaction"
+
+  # ========== Customers ==========
+  /customers:
+    post:
+      tags: [Customers]
+      summary: Crear un negocio (customer)
+      operationId: createCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCustomerRequest"
+      responses:
+        "201":
+          description: Customer creado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IDResponse"
+        "400":
+          description: Datos invalidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /customers/{id}:
+    get:
+      tags: [Customers]
+      summary: Obtener un negocio por ID
+      operationId: getCustomer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Datos del customer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "404":
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    put:
+      tags: [Customers]
+      summary: Actualizar un negocio
+      operationId: updateCustomer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCustomerRequest"
+      responses:
+        "200":
+          description: Customer actualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+
+  # ========== Collaborators ==========
+  /customers/{id}/collaborators:
+    post:
+      tags: [Collaborators]
+      summary: Crear un colaborador
+      operationId: createCollaborator
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID del customer
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCollaboratorRequest"
+      responses:
+        "201":
+          description: Colaborador creado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IDResponse"
+
+    get:
+      tags: [Collaborators]
+      summary: Listar colaboradores de un negocio
+      operationId: listCollaborators
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID del customer
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Lista de colaboradores
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Collaborator"
+
+  # ========== Feedback ==========
+  /customers/{id}/feedback:
+    get:
+      tags: [Feedback]
+      summary: Listar feedback de clientes
+      operationId: listFeedback
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID del customer
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Lista de feedback (max 50)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Feedback"

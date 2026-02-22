@@ -1,0 +1,167 @@
+package resolver
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"fmt"
+
+	"github.com/theluisbolivar/fidel-quick/internal/session"
+)
+
+// Repository abstracts database access for business/role resolution, landing, and auto-registration.
+type Repository interface {
+	GetActiveCustomerByID(ctx context.Context, id string) (name string, err error)
+	UserExistsInBusiness(ctx context.Context, phone, customerID string) (bool, error)
+	FindBusinessesByPhone(ctx context.Context, phone string) ([]session.SelectionOption, error)
+	FindCollaborator(ctx context.Context, phone, customerID string) (id string, err error)
+	FindClient(ctx context.Context, phone, customerID string) (id string, err error)
+	RegisterClient(ctx context.Context, customerID, phone string) error
+	GetCustomerBySlug(ctx context.Context, slug string) (id, name, slugOut, logoURL, description, welcomeMessage string, err error)
+	GetActiveProgramTypes(ctx context.Context, customerID string) ([]string, error)
+}
+
+// PostgresRepository implements Repository.
+type PostgresRepository struct {
+	db *sql.DB
+}
+
+func NewPostgresRepository(db *sql.DB) *PostgresRepository {
+	return &PostgresRepository{db: db}
+}
+
+func (r *PostgresRepository) GetActiveCustomerByID(ctx context.Context, id string) (string, error) {
+	var name string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT name FROM customers WHERE id = $1 AND active = true`, id,
+	).Scan(&name)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("query customer by id: %w", err)
+	}
+	return name, nil
+}
+
+func (r *PostgresRepository) UserExistsInBusiness(ctx context.Context, phone, customerID string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM clients WHERE phone = $1 AND customer_id = $2
+			UNION
+			SELECT 1 FROM collaborators WHERE phone = $1 AND customer_id = $2
+		)`, phone, customerID,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check existing user: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *PostgresRepository) FindBusinessesByPhone(ctx context.Context, phone string) ([]session.SelectionOption, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT DISTINCT c.id, c.name FROM customers c
+		INNER JOIN collaborators co ON co.customer_id = c.id
+		WHERE co.phone = $1 AND co.active = true AND c.active = true
+		UNION
+		SELECT DISTINCT c.id, c.name FROM customers c
+		INNER JOIN clients cl ON cl.customer_id = c.id
+		WHERE cl.phone = $1 AND c.active = true
+	`, phone)
+	if err != nil {
+		return nil, fmt.Errorf("query businesses by phone: %w", err)
+	}
+	defer rows.Close()
+
+	var options []session.SelectionOption
+	for rows.Next() {
+		var opt session.SelectionOption
+		if err := rows.Scan(&opt.CustomerID, &opt.Name); err != nil {
+			return nil, fmt.Errorf("scan business: %w", err)
+		}
+		options = append(options, opt)
+	}
+	return options, nil
+}
+
+func (r *PostgresRepository) FindCollaborator(ctx context.Context, phone, customerID string) (string, error) {
+	var id string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id FROM collaborators WHERE phone = $1 AND customer_id = $2 AND active = true`,
+		phone, customerID,
+	).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("query collaborator: %w", err)
+	}
+	return id, nil
+}
+
+func (r *PostgresRepository) FindClient(ctx context.Context, phone, customerID string) (string, error) {
+	var id string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id FROM clients WHERE phone = $1 AND customer_id = $2`,
+		phone, customerID,
+	).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("query client: %w", err)
+	}
+	return id, nil
+}
+
+func (r *PostgresRepository) RegisterClient(ctx context.Context, customerID, phone string) error {
+	hash := generateClientHash()
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO clients (customer_id, phone, hash) VALUES ($1, $2, $3) ON CONFLICT (customer_id, phone) DO NOTHING`,
+		customerID, phone, hash,
+	)
+	return err
+}
+
+func generateClientHash() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func (r *PostgresRepository) GetCustomerBySlug(ctx context.Context, slug string) (string, string, string, string, string, string, error) {
+	var id, name, slugOut string
+	var logoURL, description, welcomeMessage sql.NullString
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, name, slug, COALESCE(logo_url, ''), COALESCE(description, ''), COALESCE(welcome_message, '')
+		 FROM customers WHERE slug = $1 AND active = true`, slug,
+	).Scan(&id, &name, &slugOut, &logoURL, &description, &welcomeMessage)
+	if err != nil {
+		return "", "", "", "", "", "", err
+	}
+	return id, name, slugOut, logoURL.String, description.String, welcomeMessage.String, nil
+}
+
+func (r *PostgresRepository) GetActiveProgramTypes(ctx context.Context, customerID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT 'earn_burn' AS module FROM programs WHERE customer_id = $1 AND active = true
+		UNION
+		SELECT 'cashback' AS module FROM cashback_programs WHERE customer_id = $1 AND active = true
+	`, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("query active program types: %w", err)
+	}
+	defer rows.Close()
+
+	var modules []string
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, fmt.Errorf("scan program type: %w", err)
+		}
+		modules = append(modules, m)
+	}
+	return modules, nil
+}
