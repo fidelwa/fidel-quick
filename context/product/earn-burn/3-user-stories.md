@@ -450,11 +450,13 @@
   - Buscar phone en `collaborators` para ese `customer_id` → colaborador
   - Buscar phone en `clients` para ese `customer_id` → cliente
   - Si aparece en ambas tablas, **colaborador tiene prioridad**
-- [ ] Se construye `UserContext` con: role, user_id, customer_id, business_name
-- [ ] La sesion se guarda en Redis: `session:{phone}` → `{customer_id, role, user_id, business_name}` TTL 30min
+- [ ] Se construye `UserContext` con: role, user_id, customer_id, business_name, **active_modules**
+- [ ] Al crear sesion, se consultan los **programas activos del negocio** (`GetActiveProgramTypes`) y se almacenan como `active_modules` en la sesion (ej: `["earn_burn"]`, `["cashback"]`, `["earn_burn", "cashback"]`)
+- [ ] La sesion se guarda en Redis: `session:{phone}` → `{customer_id, role, user_id, business_name, active_modules}` TTL 30min
 - [ ] **Al crear una nueva sesion, se limpia cualquier flow state previo** (`ResetFlow`) para evitar que estados de flujo stale de sesiones anteriores interfieran
+- [ ] Si una sesion existente no tiene `active_modules` (sesion creada antes del cambio), se hace **backfill automatico**: se consultan los modulos activos, se guardan en la sesion, y se continua
 - [ ] El TTL de sesion se reinicia con cada mensaje
-- [ ] Comando "cambiar negocio" limpia la sesion y re-trigger resolucion
+- [ ] Opcion **"Usar otro establecimiento"** en el menu principal → borra sesion + flow state → re-trigger resolucion de negocio
 - [ ] Si la sesion expira, se re-ejecuta la resolucion de negocio
 - [ ] Mensaje sin texto (ej: imagen) sin sesion activa → pedir contexto de negocio
 
@@ -469,6 +471,9 @@
 
 **Criterios de aceptacion:**
 - [ ] Cada rol (cliente/colaborador) tiene un menu principal con opciones predefinidas
+- [ ] **El menu solo muestra opciones de los modulos con programas activos** para ese negocio (filtrado via `FilteredMenus`). Ej: si el negocio solo tiene cashback, no muestra opciones de puntos
+- [ ] Si `active_modules` esta vacio (sesion legacy), se muestran todos los menus como fallback
+- [ ] Al final del menu siempre se agrega la opcion **"Usar otro establecimiento"** (`cambiar_negocio`) para permitir al usuario cambiar de negocio
 - [ ] Los menus se presentan usando listas interactivas nativas de WhatsApp (no texto plano)
 - [ ] Al seleccionar una opcion, se inicia un flujo paso a paso (si requiere datos) o se ejecuta directamente (si es consulta)
 - [ ] El flow state se almacena en Redis (`flow:{phone}:{customer_id}`, TTL 30min)
@@ -564,7 +569,7 @@ otp:{code} → {client_id, customer_id, type, metadata}
 
 **Criterios de aceptacion:**
 - [ ] Existe una interfaz `loyalty.Module` con: `Name()`, `Menus()`, `HandleCommand()`, `FlowDefinitions()`, `RegisterRoutes()`
-- [ ] El `Registry` agrega los menus de todos los modulos registrados por rol
+- [ ] El `Registry` tiene `AllMenus(role)` para obtener menus de todos los modulos, y `FilteredMenus(role, activeModules)` para filtrar por modulos activos del negocio
 - [ ] El `Registry` despacha comandos (selecciones de menu) al modulo correcto por command_id
 - [ ] Agregar un nuevo modulo requiere SOLO: crear package + implementar interfaz + registrar en main.go
 - [ ] No se necesita modificar ningun archivo existente para agregar un modulo nuevo

@@ -431,7 +431,7 @@ registry.Register(cbModule)
 1. `go build ./...` compila sin errores
 2. `make dev` arranca sin errores
 3. Un negocio con programa cashback muestra menus de cashback (5 cliente / 5 colaborador)
-4. Un negocio con AMBOS programas (earn-burn + cashback) muestra menus combinados (10 cliente / 10 colaborador)
+4. Un negocio con AMBOS programas (earn-burn + cashback) muestra menus de ambos modulos via `FilteredMenus` + opcion "Usar otro establecimiento" al final. Un negocio con solo cashback muestra solo menus cashback
 5. "Consultar saldo" muestra balance en pesos: `$350 MXN`
 6. "Acreditar cashback" calcula correctamente: $2,000 * 5% = $100 MXN
 7. "Canjear beneficio" filtra por saldo y presenta lista interactiva
@@ -445,7 +445,7 @@ registry.Register(cbModule)
 
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|------|------------|--------|------------|
-| 1 | Menu de WhatsApp excede 10 items (earn-burn + cashback combinados) | M | M | WhatsApp soporta hasta 10 items por seccion, 3 secciones. Agrupar por modulo en secciones separadas |
+| 1 | Menu de WhatsApp excede 10 items (earn-burn + cashback combinados) | L | M | **Mitigado:** `FilteredMenus` filtra por `ActiveModules` del negocio. Solo muestra menus de modulos con programas activos + "Usar otro establecimiento". Si `ActiveModules` esta vacio (sesion legacy), hace fallback a `AllMenus` |
 | 2 | Precision decimal: errores de floating point en calculos de cashback | L | M | Usar `math.Floor(amount * rate * 100) / 100` para redondeo consistente. DECIMAL(12,2) en DB |
-| 3 | Confusion de usuario: menus earn-burn y cashback mezclados | M | L | Prefijos claros en command IDs (`cb_`). Considerar secciones separadas en el menu interactivo |
+| 3 | Confusion de usuario: menus earn-burn y cashback mezclados | L | L | **Mitigado:** `FilteredMenus` solo muestra menus de modulos activos del negocio. Prefijos claros en command IDs (`cb_`). Backfill automatico de `ActiveModules` en sesiones legacy |
 | 4 | Colision de codigos OTP entre modulos | L | L | Types diferentes (`cb_redemption` vs `redemption`). Generacion con crypto/rand tiene baja probabilidad de colision |

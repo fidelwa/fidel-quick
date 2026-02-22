@@ -33,6 +33,8 @@ Cuando alguien escribe al numero de la plataforma:
    - **Colaborador** → puede cargar puntos, confirmar canjes
 3. Si esta registrado en varios negocios, se le pregunta en cual quiere operar
 4. Si no esta registrado, se le pide que escanee el QR del establecimiento
+5. Una vez dentro de un negocio, el menu principal muestra **solo las opciones de los programas activos** de ese negocio (ej: si solo tiene cashback, no muestra opciones de puntos)
+6. Al final del menu siempre aparece **"Usar otro establecimiento"** para cambiar de negocio sin esperar a que expire la sesion
 
 ## Roles y que puede hacer cada uno
 
