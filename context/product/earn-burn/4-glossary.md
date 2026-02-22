@@ -1,0 +1,44 @@
+# Earn-Burn: Glosario
+
+> Terminologia oficial del sistema. Usar estos terminos en codigo, docs, UI y menus interactivos.
+
+| Termino | Definicion | Ejemplo |
+|---------|-----------|---------|
+| **Customer** | Negocio B2B que contrata el sistema de fidelizacion | "Restaurante El Buen Sabor" |
+| **Colaborador** | Empleado del customer que opera el sistema de puntos via WhatsApp | Mesero, cajero |
+| **Cliente** | Usuario final del establecimiento. Acumula y redime puntos | Persona que come en el restaurante |
+| **Puntos** | Unidad de valor que el cliente acumula por compras y gasta en recompensas | 3 puntos por compra de 3000 MXN |
+| **Points ratio** | Proporcion de conversion dinero → puntos. Global para todos los negocios | 1 punto = 1000 MXN |
+| **Recompensa** | Premio definido por el customer que el cliente puede obtener con puntos | "Cafe gratis" (10 pts), "Postre" (30 pts) |
+| **Redimir** | Proceso completo en el que el cliente usa puntos para obtener una recompensa. Incluye: solicitud, generacion de codigo, y confirmacion por el colaborador | "Quiero redimir el Postre por 30 puntos" |
+| **Sistema OTP unificado** | Infraestructura unica para todos los codigos temporales. Redis key: `otp:{code}` → `{client_id, customer_id, type, metadata}`. El `type` determina comportamiento (TTL, GET vs GETDEL) | `otp:X7K9M2` → `{type: "redemption", ...}` |
+| **Codigo de redencion** | OTP con `type: "redemption"` (6 chars, 1h TTL, GETDEL). Metadata incluye `{reward_id, points_spent}`. Generado al redimir, presentado al colaborador | `X7K9M2` |
+| **OTP de identidad** | OTP con `type: "identity"` (6 chars, 15min TTL, GET multi-uso). Codigo rotativo para identificarse ante el colaborador sin compartir datos personales. Solo 1 activo por cliente | `A7K3M2` |
+| **Codigo de carga** | OTP con `type: "load_points"` (6 chars, 15min TTL, GETDEL). Generado para iniciar carga de puntos con el colaborador | `P8R3K1` |
+| **Cargar puntos** | Proceso donde el cliente inicia la acreditacion de puntos: genera codigo, lo da al colaborador junto con ticket de compra | "Quiero cargar puntos" |
+| **Agregar puntos** | Operacion del colaborador para acreditar puntos directamente a un cliente usando su OTP + monto de factura | "Agregar 1500 pesos al cliente A7K3M2" |
+| **Correccion** | Ajuste de una transaccion de puntos dentro de la ventana de 2 horas. Requiere OTP vigente del cliente, evidencia del error, y comentario del colaborador explicando que paso. Se registra con `correction_reason` y `correction_evidence_url` | "Corregir de 3 a 5 puntos" |
+| **Ventana de correccion** | Periodo de 2 horas desde la creacion de una transaccion en el que un colaborador puede corregirla | `correctable_until = created_at + 2h` |
+| **Balance** | Cantidad total de puntos vigentes de un cliente. Nunca puede ser menor a 0 (RN-01) | Balance: 25 puntos |
+| **Transaccion** | Registro inmutable de un movimiento de puntos (earn, burn, adjustment). Incluye flag `manual_entry` si el monto fue ingresado sin foto de ticket | +3 pts (earn), -30 pts (burn) |
+| **Ingreso manual** | Carga de puntos donde el colaborador ingresa el monto a mano (sin foto de ticket). Se marca con `manual_entry = true` para auditoria. Max 3 intentos de foto antes de permitir manual | `manual_entry = true` |
+| **Numero de plataforma** | Numero unico de WhatsApp compartido por todos los negocios de la plataforma. Todos los clientes y colaboradores escriben al mismo numero; el sistema resuelve a que negocio pertenece cada mensaje | `WHATSAPP_DISPLAY_PHONE=5215551234567` |
+| **Slug** | Identificador URL-friendly unico por negocio. Se usa en la landing page y QR codes | `cafe-roma` en `https://fidel.app/unirse/cafe-roma` |
+| **Landing page** | Pagina web intermedia (mobile-first) que se muestra al escanear el QR. Muestra nombre, logo y descripcion del negocio con boton "Unirme por WhatsApp" que genera un deeplink con texto natural | `GET /unirse/:slug` |
+| **Deeplink** | URL `wa.me/{phone}?text=...` que abre WhatsApp con un mensaje pre-escrito. El texto es natural (ej: "Quiero unirme a Café Roma"), no un codigo tecnico | `wa.me/5215551234567?text=Quiero unirme a Café Roma` |
+| **Session (sesion)** | Contexto de negocio activo almacenado en Redis para un telefono. Evita re-resolver el negocio en cada mensaje. TTL 30min, se reinicia con cada interaccion | `session:{phone}` → `{customer_id, role, user_id, business_name}` |
+| **Business Resolver** | Componente que determina a que negocio pertenece un mensaje entrante. La landing page captura customer_id en el deeplink. Sigue el orden: sesion activa → datos embebidos del deeplink → lookup global de telefono → menu de seleccion → pedir QR. No usa fuzzy match ni AI | `resolver/business.go` |
+| **Role Resolver** | Componente que determina el rol de un usuario dentro del negocio ya resuelto. Busca en `collaborators` y `clients`; si aparece en ambas, colaborador tiene prioridad | `resolver/role.go` |
+| **Program (programa)** | Configuracion de un sistema de fidelizacion por negocio. Renombrado de `loyalty_configs`. Incluye tipo, nombre y ratio de puntos. Las rutas API se estructuran alrededor de programs | `programs` table, `/api/v1/programs/:program_id/...` |
+| **Module** | Sistema de fidelizacion independiente que implementa la interfaz `loyalty.Module` | earn-burn, cashback (futuro), tiers (futuro) |
+| **Registry** | Componente central que registra modulos y despacha comandos de menu al modulo correcto | `Registry.Dispatch(command)` |
+| **Menu interactivo** | Lista o botones nativos de WhatsApp que presentan opciones al usuario segun su rol. Reemplaza la interpretacion de lenguaje natural por seleccion directa | Menu principal cliente: Consultar puntos, Ver recompensas, etc. |
+| **Flujo (Flow)** | Secuencia de pasos predefinida para completar una operacion. Cada paso solicita un dato, lo valida, y avanza al siguiente hasta ejecutar la accion | Flujo "Agregar puntos": pedir OTP → validar → pedir foto/monto → calcular → confirmar |
+| **Flow Engine** | Motor de estado que gestiona los flujos interactivos. Mantiene el paso actual y los datos recolectados en Redis. Reemplaza el tool_use loop de Claude AI | `internal/flow/engine.go` |
+| **Flow State** | Estado actual de un flujo en curso almacenado en Redis: `{current_flow, current_step, collected_data}`. Reemplaza el historial de conversacion AI. Se limpia automaticamente al crear nueva sesion (`ResetFlow`) | `flow:{phone}:{customer_id}` → `{flow: "add_points", step: 2, data: {otp: "ABC123"}}` |
+| **AppError** | Tipo centralizado de error de aplicacion (`internal/apperror`). Contiene Code, Message, HTTPStatus y Cause. El middleware Gin convierte `c.Error(AppError)` en JSON con el status HTTP correcto. En produccion oculta detalles internos | `apperror.NotFound("cliente no encontrado", err)` |
+| **Error Middleware** | Middleware Gin (`apperror.ErrorHandler`) que intercepta errores registrados con `c.Error()`. Si es `AppError`, responde con su status y mensaje. Si es error generico, responde 500 sin exponer detalles internos | `v1.Use(apperror.ErrorHandler(log))` |
+| **resolver.Repository** | Interfaz de acceso a datos para resolvers, landing page y auto-registro de clientes. Separa queries SQL de la logica de resolucion de negocio/rol. Implementada por `PostgresRepository` | `resolver.Repository` con metodos: FindBusinessesByPhone, FindCollaborator, FindClient, RegisterClient, GetCustomerBySlug |
+| **CommandOption** | Estructura que representa un item seleccionable en una lista interactiva de WhatsApp dentro de un `CommandResult`. Permite que comandos retornen listas de opciones en vez de solo texto | `CommandOption{ID: "reward:uuid", Title: "Cafe gratis", Description: "10 pts"}` |
+| **startFlowWithData** | Metodo del Flow Engine que inicia un flujo con datos pre-cargados, saltando los pasos cuyos keys ya estan satisfechos. Usado cuando la seleccion de una lista interactiva ya provee datos (ej: reward_id) | `startFlowWithData(user, "request_redemption", {"reward_id": "uuid"})` |
+| **Arquitectura por capas** | Patron implementado: Controller (API handlers) → Service (logica de negocio + clasificacion de errores con apperror) → Repository (acceso a datos). Los handlers no hacen SQL directo; el service clasifica errores; el middleware convierte errores a HTTP | `api.go` → `service.go` → `repository.go` |
