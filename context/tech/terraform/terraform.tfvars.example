@@ -1,0 +1,47 @@
+# =============================================================================
+# Variables de configuracion — copiar a terraform.tfvars y llenar
+# =============================================================================
+#
+# Uso:
+#   1. Copiar el plan elegido como main.tf:
+#      cp plan-a-mvp-minimo.tf main.tf
+#
+#   2. Copiar este archivo:
+#      cp terraform.tfvars.example terraform.tfvars
+#
+#   3. Llenar los valores y ejecutar:
+#      terraform init
+#      terraform plan
+#      terraform apply
+#
+# =============================================================================
+
+project_id = "fidel-mvp"
+region     = "us-central1"
+
+# PostgreSQL
+db_password = "GENERA_UN_PASSWORD_SEGURO_AQUI"
+
+# WhatsApp Business API
+whatsapp_api_token       = "tu_token_de_api"
+whatsapp_verify_token    = "tu_token_de_verificacion"
+whatsapp_phone_number_id = "tu_phone_number_id"
+whatsapp_display_phone   = "5215551234567"
+
+# Auth
+jwt_secret   = "genera-un-secret-largo-y-aleatorio"
+bearer_token = "genera-un-bearer-token-seguro"
+
+# AI (OCR de tickets)
+anthropic_api_key = "sk-ant-xxxxx"
+
+# Docker image (despues del primer build)
+container_image = "us-central1-docker.pkg.dev/fidel-mvp/fidel-repo/fidel-quick:latest"
+
+# --- Solo Plan A: Redis externo ---
+# upstash_redis_url = "rediss://default:xxxxx@us1-xxxxx.upstash.io:6379"
+
+# --- Solo Plan B: Opcionales ---
+# custom_domain = "api.fidel.app"
+# platform_url  = "https://fidel.app"
+# alert_email   = "alerts@fidel.app"

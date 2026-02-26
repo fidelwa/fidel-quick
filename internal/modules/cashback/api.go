@@ -34,7 +34,8 @@ func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 // --- Program endpoints ---
 
 func (h *APIHandler) listPrograms(c *gin.Context) {
-	programs, err := h.service.ListPrograms(c.Request.Context())
+	customerID := c.Query("customer_id")
+	programs, err := h.service.ListPrograms(c.Request.Context(), customerID)
 	if err != nil {
 		c.Error(err)
 		return

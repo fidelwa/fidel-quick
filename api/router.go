@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/theluisbolivar/fidel-quick/api/middleware"
+	"github.com/theluisbolivar/fidel-quick/internal/admin"
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
 	"github.com/theluisbolivar/fidel-quick/internal/landing"
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
@@ -19,9 +20,11 @@ var openapiSpec []byte
 // SetupRouter creates and configures the Gin router with all routes.
 func SetupRouter(
 	bearerToken string,
+	jwtSecret string,
 	landingHandler *landing.Handler,
 	webhookHandler *whatsapp.WebhookHandler,
 	registry *loyalty.Registry,
+	adminAPI *admin.APIHandler,
 	log *slog.Logger,
 	isDev bool,
 ) *gin.Engine {
@@ -45,9 +48,14 @@ func SetupRouter(
 		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(swaggerHTML))
 	})
 
-	// REST API (bearer token auth + error middleware)
+	// Auth endpoints (public — no auth required)
+	auth := r.Group("/api/v1/auth")
+	auth.Use(apperror.ErrorHandler(log))
+	adminAPI.RegisterRoutes(auth)
+
+	// REST API (JWT or bearer token auth + error middleware)
 	v1 := r.Group("/api/v1")
-	v1.Use(middleware.BearerAuth(bearerToken))
+	v1.Use(middleware.JWTOrBearer(jwtSecret, bearerToken))
 	v1.Use(apperror.ErrorHandler(log))
 
 	// Module REST routes (each module registers its own)

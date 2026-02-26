@@ -8,6 +8,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/theluisbolivar/fidel-quick/api"
+	"github.com/theluisbolivar/fidel-quick/internal/admin"
 	"github.com/theluisbolivar/fidel-quick/internal/config"
 	"github.com/theluisbolivar/fidel-quick/internal/flow"
 	"github.com/theluisbolivar/fidel-quick/internal/landing"
@@ -96,11 +97,16 @@ func main() {
 		log,
 	)
 
+	// Admin auth
+	adminRepo := admin.NewPostgresRepository(database)
+	adminService := admin.NewService(adminRepo, cfg.JWTSecret)
+	adminAPI := admin.NewAPIHandler(adminService)
+
 	// Landing page
 	landingHandler := landing.NewHandler(resolverRepo, log, cfg.WhatsAppDisplayPhone)
 
 	// Router (API + landing + webhook)
-	r := api.SetupRouter(cfg.BearerToken, landingHandler, webhookHandler, registry, log, cfg.IsDevelopment())
+	r := api.SetupRouter(cfg.BearerToken, cfg.JWTSecret, landingHandler, webhookHandler, registry, adminAPI, log, cfg.IsDevelopment())
 
 	log.Info("server starting", "port", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

@@ -21,12 +21,12 @@ const (
 )
 
 type Service struct {
-	repo  *PostgresRepository
+	repo  Repository
 	cache Cache
 	log   *slog.Logger
 }
 
-func NewService(repo *PostgresRepository, cache Cache, log *slog.Logger) *Service {
+func NewService(repo Repository, cache Cache, log *slog.Logger) *Service {
 	return &Service{repo: repo, cache: cache, log: log}
 }
 
@@ -348,8 +348,8 @@ func (s *Service) GetReward(ctx context.Context, id string) (*Reward, error) {
 
 // --- Admin CRUD ---
 
-func (s *Service) ListPrograms(ctx context.Context) ([]Program, error) {
-	programs, err := s.repo.ListPrograms(ctx)
+func (s *Service) ListPrograms(ctx context.Context, customerID string) ([]Program, error) {
+	programs, err := s.repo.ListPrograms(ctx, customerID)
 	if err != nil {
 		return nil, apperror.Internal("error al listar programas", err)
 	}
@@ -433,6 +433,14 @@ func (s *Service) UpdateRewardAdmin(ctx context.Context, r *Reward) error {
 		return apperror.Internal("error al actualizar recompensa", err)
 	}
 	return nil
+}
+
+func (s *Service) ListClients(ctx context.Context, customerID string) ([]Client, error) {
+	clients, err := s.repo.ListClients(ctx, customerID)
+	if err != nil {
+		return nil, apperror.Internal("error al listar clientes", err)
+	}
+	return clients, nil
 }
 
 func (s *Service) ListFeedback(ctx context.Context, customerID string) ([]FeedbackEntry, error) {

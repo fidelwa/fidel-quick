@@ -30,7 +30,7 @@ type Repository interface {
 	CreateFeedback(ctx context.Context, clientID, customerID, message string) error
 
 	// Admin CRUD
-	ListPrograms(ctx context.Context) ([]CashbackProgram, error)
+	ListPrograms(ctx context.Context, customerID string) ([]CashbackProgram, error)
 	CreateProgram(ctx context.Context, p *CashbackProgram) error
 	UpdateProgram(ctx context.Context, p *CashbackProgram) error
 	ListAllRewards(ctx context.Context, programID string) ([]CashbackReward, error)
@@ -433,9 +433,10 @@ func (r *PostgresRepository) AdjustCashbackTx(ctx context.Context, t *CashbackTr
 
 // --- Admin CRUD ---
 
-func (r *PostgresRepository) ListPrograms(ctx context.Context) ([]CashbackProgram, error) {
+func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string) ([]CashbackProgram, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, customer_id, type, name, cashback_rate, active FROM cashback_programs ORDER BY created_at`)
+		`SELECT id, customer_id, type, name, cashback_rate, active FROM cashback_programs WHERE customer_id = $1 ORDER BY created_at`,
+		customerID)
 	if err != nil {
 		return nil, fmt.Errorf("list cashback programs: %w", err)
 	}

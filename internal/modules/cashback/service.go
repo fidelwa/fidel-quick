@@ -22,13 +22,13 @@ const (
 )
 
 type Service struct {
-	repo          *PostgresRepository
+	repo          Repository
 	cache         Cache
 	identityCache earnburn.Cache // shared identity OTP cache
 	log           *slog.Logger
 }
 
-func NewService(repo *PostgresRepository, cache Cache, identityCache earnburn.Cache, log *slog.Logger) *Service {
+func NewService(repo Repository, cache Cache, identityCache earnburn.Cache, log *slog.Logger) *Service {
 	return &Service{repo: repo, cache: cache, identityCache: identityCache, log: log}
 }
 
@@ -358,8 +358,8 @@ func (s *Service) GetReward(ctx context.Context, id string) (*CashbackReward, er
 
 // --- Admin CRUD ---
 
-func (s *Service) ListPrograms(ctx context.Context) ([]CashbackProgram, error) {
-	programs, err := s.repo.ListPrograms(ctx)
+func (s *Service) ListPrograms(ctx context.Context, customerID string) ([]CashbackProgram, error) {
+	programs, err := s.repo.ListPrograms(ctx, customerID)
 	if err != nil {
 		return nil, apperror.Internal("error al listar programas cashback", err)
 	}

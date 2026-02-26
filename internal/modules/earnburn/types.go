@@ -3,53 +3,53 @@ package earnburn
 import "time"
 
 type Transaction struct {
-	ID                    string
-	ClientID              string
-	ProgramID             string
-	CollaboratorID        string
-	Type                  string // "earn", "burn", "adjustment"
-	Amount                int
-	BalanceAfter          int
-	InvoiceURL            string
-	Description           string
-	ManualEntry           bool
-	CorrectionReason      string
-	CorrectionEvidenceURL string
-	CorrectableUntil      *time.Time
-	CreatedAt             time.Time
+	ID                    string     `json:"id"`
+	ClientID              string     `json:"client_id"`
+	ProgramID             string     `json:"program_id"`
+	CollaboratorID        string     `json:"collaborator_id"`
+	Type                  string     `json:"type"` // "earn", "burn", "adjustment"
+	Amount                int        `json:"amount"`
+	BalanceAfter          int        `json:"balance_after"`
+	InvoiceURL            string     `json:"invoice_url"`
+	Description           string     `json:"description"`
+	ManualEntry           bool       `json:"manual_entry"`
+	CorrectionReason      string     `json:"correction_reason"`
+	CorrectionEvidenceURL string     `json:"correction_evidence_url"`
+	CorrectableUntil      *time.Time `json:"correctable_until"`
+	CreatedAt             time.Time  `json:"created_at"`
 }
 
 type Reward struct {
-	ID          string
-	CustomerID  string
-	ProgramID   string
-	Name        string
-	Description string
-	PointsCost  int
-	Active      bool
+	ID          string `json:"id"`
+	CustomerID  string `json:"customer_id"`
+	ProgramID   string `json:"program_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	PointsCost  int    `json:"points_cost"`
+	Active      bool   `json:"active"`
 }
 
 type Redemption struct {
-	ID          string
-	ClientID    string
-	RewardID    string
-	ProgramID   string
-	Code        string
-	Status      string // "pending", "confirmed", "expired", "cancelled"
-	PointsSpent int
-	ConfirmedBy string
-	ExpiresAt   time.Time
-	ConfirmedAt *time.Time
-	CreatedAt   time.Time
+	ID          string     `json:"id"`
+	ClientID    string     `json:"client_id"`
+	RewardID    string     `json:"reward_id"`
+	ProgramID   string     `json:"program_id"`
+	Code        string     `json:"code"`
+	Status      string     `json:"status"` // "pending", "confirmed", "expired", "cancelled"
+	PointsSpent int        `json:"points_spent"`
+	ConfirmedBy string     `json:"confirmed_by"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+	ConfirmedAt *time.Time `json:"confirmed_at"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 type Program struct {
-	ID          string
-	CustomerID  string
-	Type        string
-	Name        string
-	PointsRatio int
-	Active      bool
+	ID          string `json:"id"`
+	CustomerID  string `json:"customer_id"`
+	Type        string `json:"type"`
+	Name        string `json:"name"`
+	PointsRatio int    `json:"points_ratio"`
+	Active      bool   `json:"active"`
 }
 
 type AddPointsReq struct {
@@ -84,29 +84,37 @@ type LoadPointsReq struct {
 }
 
 type Customer struct {
-	ID             string
-	Name           string
-	Slug           string
-	Phone          string
-	Address        string
-	LogoURL        string
-	Description    string
-	WelcomeMessage string
-	Active         bool
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Slug           string `json:"slug"`
+	Phone          string `json:"phone"`
+	Address        string `json:"address"`
+	LogoURL        string `json:"logo_url"`
+	Description    string `json:"description"`
+	WelcomeMessage string `json:"welcome_message"`
+	Active         bool   `json:"active"`
 }
 
 type Collaborator struct {
-	ID         string
-	CustomerID string
-	Name       string
-	Phone      string
-	HashID     string
-	Active     bool
+	ID         string `json:"id"`
+	CustomerID string `json:"customer_id"`
+	Name       string `json:"name"`
+	Phone      string `json:"phone"`
+	HashID     string `json:"hash_id"`
+	Active     bool   `json:"active"`
+}
+
+type Client struct {
+	ID         string    `json:"id"`
+	CustomerID string    `json:"customer_id"`
+	Name       string    `json:"name"`
+	Phone      string    `json:"phone"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type FeedbackEntry struct {
-	ID         string
-	Message    string
-	ClientName string
-	CreatedAt  time.Time
+	ID         string    `json:"id"`
+	Message    string    `json:"message"`
+	ClientName string    `json:"client_name"`
+	CreatedAt  time.Time `json:"created_at"`
 }

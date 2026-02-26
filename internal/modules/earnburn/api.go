@@ -37,6 +37,7 @@ func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		customers.PUT("/:id", h.updateCustomer)
 		customers.POST("/:id/collaborators", h.createCollaborator)
 		customers.GET("/:id/collaborators", h.listCollaborators)
+		customers.GET("/:id/clients", h.listClients)
 		customers.GET("/:id/feedback", h.listFeedback)
 	}
 }
@@ -44,7 +45,8 @@ func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 // --- Program endpoints ---
 
 func (h *APIHandler) listPrograms(c *gin.Context) {
-	programs, err := h.service.ListPrograms(c.Request.Context())
+	customerID := c.Query("customer_id")
+	programs, err := h.service.ListPrograms(c.Request.Context(), customerID)
 	if err != nil {
 		c.Error(err)
 		return
@@ -317,6 +319,17 @@ func (h *APIHandler) listCollaborators(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, collabs)
+}
+
+// --- Clients ---
+
+func (h *APIHandler) listClients(c *gin.Context) {
+	clients, err := h.service.ListClients(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, clients)
 }
 
 // --- Feedback ---

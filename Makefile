@@ -59,9 +59,59 @@ stop: infra-down ## Stop everything
 dev: ## Run the Go app locally (infra must be running)
 	go run main.go
 
+.PHONY: dev-admin
+dev-admin: ## Run the admin dashboard in dev mode
+	cd admin && npm run dev
+
+.PHONY: dev-all
+dev-all: ## Run Go backend + admin frontend concurrently (infra must be running)
+	@trap 'kill 0' EXIT; \
+	go run main.go & \
+	cd admin && npm run dev & \
+	wait
+
 .PHONY: build
 build: ## Build the Go binary
 	CGO_ENABLED=0 go build -o fidel-quick .
+
+.PHONY: build-admin
+build-admin: ## Build the admin dashboard for production
+	cd admin && npm run build
+
+.PHONY: build-all
+build-all: build build-admin ## Build Go binary + admin dashboard
+
+## Admin Setup
+
+.PHONY: admin-install
+admin-install: ## Install admin dashboard dependencies
+	cd admin && npm install
+
+.PHONY: create-admin
+create-admin: ## Create admin account (usage: make create-admin EMAIL=tu@email.com PASSWORD=secret CUSTOMER_ID=uuid)
+	@if [ -z "$(EMAIL)" ] || [ -z "$(PASSWORD)" ] || [ -z "$(CUSTOMER_ID)" ]; then \
+		echo "Uso: make create-admin EMAIL=tu@email.com PASSWORD=secret CUSTOMER_ID=uuid"; \
+		exit 1; \
+	fi
+	@curl -s -X POST http://localhost:8080/api/v1/auth/register \
+		-H "Content-Type: application/json" \
+		-d '{"email":"$(EMAIL)","password":"$(PASSWORD)","customer_id":"$(CUSTOMER_ID)"}' | python3 -m json.tool
+
+## Full Stack
+
+.PHONY: start-all
+start-all: ## One command: infra + migrate + backend + admin frontend
+	@echo "Starting infrastructure..."
+	@docker compose --profile infra up -d
+	@echo "Waiting for Postgres..."
+	@until docker compose exec postgres pg_isready -U loyalty -q 2>/dev/null; do sleep 1; done
+	@echo "Running migrations..."
+	@migrate -path $(MIGRATIONS_PATH) -database "$(DATABASE_URL)" up
+	@echo "Starting backend + admin..."
+	@trap 'kill 0' EXIT; \
+	go run main.go & \
+	cd admin && npm run dev & \
+	wait
 
 ## Help
 

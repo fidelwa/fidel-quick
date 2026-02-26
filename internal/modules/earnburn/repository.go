@@ -32,7 +32,7 @@ type Repository interface {
 	CreateFeedback(ctx context.Context, clientID, customerID, message string) error
 
 	// Admin CRUD
-	ListPrograms(ctx context.Context) ([]Program, error)
+	ListPrograms(ctx context.Context, customerID string) ([]Program, error)
 	CreateProgram(ctx context.Context, p *Program) error
 	UpdateProgram(ctx context.Context, p *Program) error
 	GetCustomer(ctx context.Context, id string) (*Customer, error)
@@ -44,7 +44,14 @@ type Repository interface {
 	CreateRewardAdmin(ctx context.Context, programID string, r *Reward) error
 	UpdateRewardAdmin(ctx context.Context, r *Reward) error
 	ListFeedback(ctx context.Context, customerID string) ([]FeedbackEntry, error)
+	ListClients(ctx context.Context, customerID string) ([]Client, error)
 	RegisterClient(ctx context.Context, customerID, phone string) error
+
+	// Transactional
+	AddPointsTx(ctx context.Context, t *Transaction) (int, error)
+	BurnPointsTx(ctx context.Context, t *Transaction, rd *Redemption) error
+	AdjustPointsTx(ctx context.Context, t *Transaction) (int, error)
+	EnsureBalance(ctx context.Context, clientID, programID string) error
 }
 
 // PostgresRepository implements Repository.
@@ -398,9 +405,10 @@ func (r *PostgresRepository) BurnPointsTx(ctx context.Context, t *Transaction, r
 
 // --- Admin CRUD ---
 
-func (r *PostgresRepository) ListPrograms(ctx context.Context) ([]Program, error) {
+func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string) ([]Program, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, customer_id, type, name, points_ratio, active FROM programs ORDER BY created_at`)
+		`SELECT id, customer_id, type, name, points_ratio, active FROM programs WHERE customer_id = $1 ORDER BY created_at`,
+		customerID)
 	if err != nil {
 		return nil, fmt.Errorf("list programs: %w", err)
 	}
@@ -572,6 +580,28 @@ func (r *PostgresRepository) ListFeedback(ctx context.Context, customerID string
 		entries = append(entries, e)
 	}
 	return entries, nil
+}
+
+func (r *PostgresRepository) ListClients(ctx context.Context, customerID string) ([]Client, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, customer_id, name, phone, created_at FROM clients WHERE customer_id = $1 ORDER BY created_at DESC`,
+		customerID)
+	if err != nil {
+		return nil, fmt.Errorf("list clients: %w", err)
+	}
+	defer rows.Close()
+
+	var clients []Client
+	for rows.Next() {
+		var c Client
+		var name sql.NullString
+		if err := rows.Scan(&c.ID, &c.CustomerID, &name, &c.Phone, &c.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan client: %w", err)
+		}
+		c.Name = name.String
+		clients = append(clients, c)
+	}
+	return clients, nil
 }
 
 func (r *PostgresRepository) RegisterClient(ctx context.Context, customerID, phone string) error {

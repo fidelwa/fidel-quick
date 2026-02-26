@@ -158,7 +158,7 @@ func (m *Module) handleRedeemRewards(ctx context.Context, cmd loyalty.Command) (
 		}, nil
 	}
 
-	msg := fmt.Sprintf("Tienes *%d puntos*. Selecciona una recompensa:")
+	msg := fmt.Sprintf("Tienes *%d puntos*. Selecciona una recompensa:", balance)
 
 	var options []loyalty.CommandOption
 	for _, rw := range rewards {

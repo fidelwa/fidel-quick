@@ -19,6 +19,7 @@ type Config struct {
 	WhatsAppDisplayPhone  string
 	PlatformURL           string
 	BearerToken           string
+	JWTSecret             string
 }
 
 func Load() *Config {
@@ -39,6 +40,7 @@ func Load() *Config {
 		WhatsAppDisplayPhone:  getEnv("WHATSAPP_DISPLAY_PHONE", ""),
 		PlatformURL:           getEnv("PLATFORM_URL", ""),
 		BearerToken:           getEnv("BEARER_TOKEN", ""),
+		JWTSecret:             getEnv("JWT_SECRET", "change-me-in-production"),
 	}
 }
 
