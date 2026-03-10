@@ -9,6 +9,7 @@ import (
 
 type Repository interface {
 	GetProgram(ctx context.Context, customerID string) (*CashbackProgram, error)
+	GetProgramByID(ctx context.Context, programID string) (*CashbackProgram, error)
 	GetBalance(ctx context.Context, clientID, programID string) (float64, error)
 	UpsertBalance(ctx context.Context, clientID, programID string, delta float64) (float64, error)
 	CreateTransaction(ctx context.Context, tx *CashbackTransaction) error
@@ -66,6 +67,18 @@ func (r *PostgresRepository) GetProgram(ctx context.Context, customerID string) 
 	return &p, nil
 }
 
+func (r *PostgresRepository) GetProgramByID(ctx context.Context, programID string) (*CashbackProgram, error) {
+	var p CashbackProgram
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, customer_id, type, name, cashback_rate, active
+		 FROM cashback_programs WHERE id = $1`, programID,
+	).Scan(&p.ID, &p.CustomerID, &p.Type, &p.Name, &p.CashbackRate, &p.Active)
+	if err != nil {
+		return nil, fmt.Errorf("get cashback program by id: %w", err)
+	}
+	return &p, nil
+}
+
 func (r *PostgresRepository) GetBalance(ctx context.Context, clientID, programID string) (float64, error) {
 	var balance float64
 	err := r.db.QueryRowContext(ctx,
@@ -100,7 +113,7 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *Cashback
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO cashback_transactions
 		(id, client_id, program_id, collaborator_id, type, amount, purchase_amount, balance_after, invoice_url, description, manual_entry, correction_reason, correction_evidence_url, correctable_until)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6::NUMERIC, $7::NUMERIC, $8::NUMERIC, NULLIF($9, ''), NULLIF($10, ''), $11, NULLIF($12, ''), NULLIF($13, ''), $14)
+		VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6::NUMERIC, $7::NUMERIC, $8::NUMERIC, NULLIF($9, ''), NULLIF($10, ''), $11, NULLIF($12, ''), NULLIF($13, ''), $14)
 	`, tx.ID, tx.ClientID, tx.ProgramID, tx.CollaboratorID, tx.Type, tx.Amount, tx.PurchaseAmount, tx.BalanceAfter,
 		tx.InvoiceURL, tx.Description, tx.ManualEntry, tx.CorrectionReason, tx.CorrectionEvidenceURL, tx.CorrectableUntil)
 	if err != nil {
@@ -352,7 +365,7 @@ func (r *PostgresRepository) AddCashbackTx(ctx context.Context, t *CashbackTrans
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO cashback_transactions
 			(id, client_id, program_id, collaborator_id, type, amount, purchase_amount, balance_after, invoice_url, description, manual_entry, correctable_until)
-			VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6::NUMERIC, $7::NUMERIC, $8::NUMERIC, NULLIF($9, ''), NULLIF($10, ''), $11, $12)
+			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6::NUMERIC, $7::NUMERIC, $8::NUMERIC, NULLIF($9, ''), NULLIF($10, ''), $11, $12)
 		`, t.ID, t.ClientID, t.ProgramID, t.CollaboratorID, t.Type, t.Amount, t.PurchaseAmount, t.BalanceAfter,
 			t.InvoiceURL, t.Description, t.ManualEntry, t.CorrectableUntil)
 		return err
@@ -423,7 +436,7 @@ func (r *PostgresRepository) AdjustCashbackTx(ctx context.Context, t *CashbackTr
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO cashback_transactions
 			(id, client_id, program_id, collaborator_id, type, amount, balance_after, correction_reason, correction_evidence_url)
-			VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6::NUMERIC, $7::NUMERIC, NULLIF($8, ''), NULLIF($9, ''))
+			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6::NUMERIC, $7::NUMERIC, NULLIF($8, ''), NULLIF($9, ''))
 		`, t.ID, t.ClientID, t.ProgramID, t.CollaboratorID, t.Type, t.Amount, t.BalanceAfter,
 			t.CorrectionReason, t.CorrectionEvidenceURL)
 		return err

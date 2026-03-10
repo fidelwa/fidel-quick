@@ -51,6 +51,12 @@ func (m *mockRepo) GetProgram(ctx context.Context, customerID string) (*Program,
 	}
 	return &Program{ID: "prog-1", CustomerID: customerID, Type: "earn_burn", PointsRatio: 1000, Active: true}, nil
 }
+func (m *mockRepo) GetProgramByID(ctx context.Context, programID string) (*Program, error) {
+	if m.getProgramFn != nil {
+		return m.getProgramFn(ctx, programID)
+	}
+	return &Program{ID: programID, CustomerID: "cust-1", Type: "earn_burn", PointsRatio: 1000, Active: true}, nil
+}
 
 func (m *mockRepo) GetBalance(ctx context.Context, clientID, programID string) (int, error) {
 	if m.getBalanceFn != nil {

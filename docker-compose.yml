@@ -65,6 +65,10 @@ services:
       - "8080:8080"
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgres://loyalty:loyalty@postgres:5432/loyalty?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,6 +76,14 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+
+  admin:
+    build: ./admin
+    profiles: [full]
+    ports:
+      - "3000:3000"
+    depends_on:
+      - app
 
 volumes:
   postgres-data:

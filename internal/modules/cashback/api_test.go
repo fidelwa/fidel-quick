@@ -19,7 +19,7 @@ func init() {
 }
 
 func setupAPIRouter(repo *mockRepo) *gin.Engine {
-	svc := NewService(repo, newMockCache(), newMockIdentityCache(), testLogger())
+	svc := NewService(repo, newMockCache(), testLogger())
 	handler := NewAPIHandler(svc)
 
 	r := gin.New()

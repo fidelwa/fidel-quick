@@ -1,12 +1,12 @@
 import { useState } from "react"
-import { useNavigate, Navigate } from "react-router-dom"
+import { useNavigate, Navigate, Link } from "react-router-dom"
 import { useAuth } from "@/context/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "sonner"
-import { loginAdmin, setToken } from "@/lib/api-client"
+import { loginAdmin, setToken, getCustomer } from "@/lib/api-client"
 
 export function LoginPage() {
   const { isAuthenticated, login } = useAuth()
@@ -31,7 +31,12 @@ export function LoginPage() {
       const res = await loginAdmin(email.trim(), password)
       setToken(res.token)
       login(res.token, res.admin.customer_id, res.admin.email)
-      navigate("/")
+      const customer = await getCustomer(res.admin.customer_id)
+      if (!customer.onboarding_completed) {
+        navigate("/onboarding")
+      } else {
+        navigate("/")
+      }
     } catch {
       setToken("")
       toast.error("Credenciales invalidas")
@@ -75,6 +80,13 @@ export function LoginPage() {
               {loading ? "Verificando..." : "Iniciar sesion"}
             </Button>
           </form>
+
+          <p className="mt-4 text-center text-sm text-muted-foreground">
+            ¿No tienes cuenta?{" "}
+            <Link to="/registro" className="text-primary underline-offset-4 hover:underline">
+              Registrate
+            </Link>
+          </p>
         </CardContent>
       </Card>
     </div>

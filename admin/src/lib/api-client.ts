@@ -11,6 +11,7 @@ import type {
   CashbackTransaction,
   Balance,
   AuthResponse,
+  OnboardingRegisterRequest,
 } from "@/types"
 
 const BASE_URL = import.meta.env.VITE_API_URL || "/api/v1"
@@ -161,3 +162,13 @@ export const registerAdmin = (email: string, password: string, customer_id: stri
     method: "POST",
     body: JSON.stringify({ email, password, customer_id }),
   })
+
+// Onboarding
+export const onboardingRegister = (data: OnboardingRegisterRequest) =>
+  request<AuthResponse>(`/onboarding/register`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+
+export const checkSlug = (slug: string) =>
+  request<{ available: boolean }>(`/onboarding/check-slug/${slug}`)

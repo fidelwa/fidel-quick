@@ -1,0 +1,9 @@
+admin/node_modules
+admin/dist
+admin/.tsbuildinfo
+context/
+*.md
+.git
+.env
+.env.*
+!.env.example

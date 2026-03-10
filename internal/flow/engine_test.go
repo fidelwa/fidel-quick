@@ -83,6 +83,7 @@ func (m *fakeModule) FlowDefinitions() map[string]loyalty.FlowDefinition {
 			CommandID: "photo_flow",
 			Steps: []loyalty.StepDefinition{
 				{ID: "step1", Prompt: "Send photo:", Key: "photo", NeedsPhoto: true},
+				{ID: "step2", Prompt: "Confirm:", Key: "confirm"},
 			},
 		},
 	}
@@ -97,12 +98,167 @@ func (m *fakeModule) HandleCommand(ctx context.Context, cmd loyalty.Command) (*l
 
 func (m *fakeModule) RegisterRoutes(rg *gin.RouterGroup) {}
 
+// --- Mock PhotoProcessor ---
+
+type mockPhotoProcessor struct {
+	result *PhotoProcessResult
+	err    error
+	called bool
+}
+
+func (m *mockPhotoProcessor) ProcessPhoto(_ context.Context, _ string) (*PhotoProcessResult, error) {
+	m.called = true
+	return m.result, m.err
+}
+
+// --- Mock StateStore (in-memory, for tests that need Set/Delete) ---
+
+type memoryStore struct {
+	data map[string]*State
+}
+
+func newMemoryStore() *memoryStore {
+	return &memoryStore{data: make(map[string]*State)}
+}
+
+func (m *memoryStore) Get(_ context.Context, phone, customerID string) (*State, error) {
+	return m.data[phone+":"+customerID], nil
+}
+
+func (m *memoryStore) Set(_ context.Context, phone, customerID string, fs *State) error {
+	m.data[phone+":"+customerID] = fs
+	return nil
+}
+
+func (m *memoryStore) Delete(_ context.Context, phone, customerID string) error {
+	delete(m.data, phone+":"+customerID)
+	return nil
+}
+
 // --- Test Helpers ---
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
+func TestEngine_ProcessStep_PhotoProcessor_PopulatesAmountAndCurrency(t *testing.T) {
+	registry := loyalty.NewRegistry()
+	mod := &fakeModule{}
+	registry.Register(mod)
+
+	sender := &mockSender{}
+	photoProc := &mockPhotoProcessor{
+		result: &PhotoProcessResult{
+			StorageURL: "loyalty-invoices/invoices/2025-01-15/abc.jpg",
+			Amount:     325.50,
+			Currency:   "MXN",
+		},
+	}
+
+	engine := &Engine{
+		registry:       registry,
+		store:          newMemoryStore(),
+		sender:         sender,
+		photoProcessor: photoProc,
+		log:            testLogger(),
+	}
+
+	user := loyalty.UserContext{
+		CustomerID:    "cust-1",
+		BusinessName:  "Test",
+		Role:          "client",
+		Phone:         "+123",
+		ActiveModules: []string{"test_mod"},
+	}
+
+	fs := &State{
+		CurrentFlow:   "photo_flow",
+		CurrentStep:   0,
+		CollectedData: make(map[string]string),
+	}
+
+	err := engine.processStep(context.Background(), user, fs, "image", "", "https://wa.media/img123")
+
+	require.NoError(t, err)
+	assert.True(t, photoProc.called)
+	assert.Equal(t, "325.50", fs.CollectedData["amount"])
+	assert.Equal(t, "MXN", fs.CollectedData["currency"])
+	assert.Equal(t, "loyalty-invoices/invoices/2025-01-15/abc.jpg", fs.CollectedData["photo"])
+}
+
+func TestEngine_ProcessStep_PhotoProcessor_Error_SendsRetryMessage(t *testing.T) {
+	registry := loyalty.NewRegistry()
+	mod := &fakeModule{}
+	registry.Register(mod)
+
+	sender := &mockSender{}
+	photoProc := &mockPhotoProcessor{
+		err: fmt.Errorf("gemini timeout"),
+	}
+
+	engine := &Engine{
+		registry:       registry,
+		store:          newMemoryStore(),
+		sender:         sender,
+		photoProcessor: photoProc,
+		log:            testLogger(),
+	}
+
+	user := loyalty.UserContext{
+		CustomerID:    "cust-1",
+		Phone:         "+123",
+		ActiveModules: []string{"test_mod"},
+	}
+
+	fs := &State{
+		CurrentFlow:   "photo_flow",
+		CurrentStep:   0,
+		CollectedData: make(map[string]string),
+	}
+
+	err := engine.processStep(context.Background(), user, fs, "image", "", "https://wa.media/img")
+
+	require.NoError(t, err)
+	require.Len(t, sender.sentTexts, 1)
+	assert.Contains(t, sender.sentTexts[0].text, "Error al procesar la foto")
+}
+
+func TestEngine_ProcessStep_NilPhotoProcessor_UsesRawURL(t *testing.T) {
+	registry := loyalty.NewRegistry()
+	mod := &fakeModule{}
+	registry.Register(mod)
+
+	sender := &mockSender{}
+
+	engine := &Engine{
+		registry:       registry,
+		store:          newMemoryStore(),
+		sender:         sender,
+		photoProcessor: nil, // no processor
+		log:            testLogger(),
+	}
+
+	user := loyalty.UserContext{
+		CustomerID:    "cust-1",
+		BusinessName:  "Test",
+		Phone:         "+123",
+		ActiveModules: []string{"test_mod"},
+	}
+
+	fs := &State{
+		CurrentFlow:   "photo_flow",
+		CurrentStep:   0,
+		CollectedData: make(map[string]string),
+	}
+
+	err := engine.processStep(context.Background(), user, fs, "image", "", "https://wa.media/raw-url")
+
+	require.NoError(t, err)
+	// Should store raw URL as photo (backward compat)
+	assert.Equal(t, "https://wa.media/raw-url", fs.CollectedData["photo"])
+	// Should NOT have amount populated
+	assert.Empty(t, fs.CollectedData["amount"])
+}
 
 func TestEngine_HandleMessage_NoActiveFlow_TextMessage_ShowsMenu(t *testing.T) {
 	// Test that a text message with no active flow shows the main menu
@@ -111,11 +267,9 @@ func TestEngine_HandleMessage_NoActiveFlow_TextMessage_ShowsMenu(t *testing.T) {
 	registry.Register(mod)
 
 	sender := &mockSender{}
-	store := NewStateStore(nil) // Will use directly without Redis for this test
-
 	engine := &Engine{
 		registry: registry,
-		store:    store,
+		store:    newMemoryStore(),
 		sender:   sender,
 		log:      testLogger(),
 	}
@@ -283,7 +437,7 @@ func TestEngine_ResetFlow(t *testing.T) {
 	// ResetFlow with a nil Redis client should not be called in production,
 	// but we verify the Engine struct can be constructed without crashing on setup.
 	engine := &Engine{
-		store: NewStateStore(nil),
+		store: newMemoryStore(),
 		log:   testLogger(),
 	}
 	// Verify engine was created successfully

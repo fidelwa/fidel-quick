@@ -122,13 +122,15 @@ func (h *WebhookHandler) processMessage(ctx context.Context, msg Message) {
 
 	// 2. No session — resolve business
 	if uc == nil {
+		h.log.Info("no session found, resolving context", "phone", phone)
 		uc, err = h.resolveContext(ctx, phone, msgText)
 		if err != nil {
-			h.log.Error("resolve context failed", "error", err)
+			h.log.Error("resolve context failed", "error", err, "phone", phone)
 			return
 		}
 		if uc == nil {
-			return // message already sent to user (multi-biz selection or not registered)
+			h.log.Info("resolve context returned nil (pending selection or not registered)", "phone", phone)
+			return
 		}
 		// Session just created — show main menu instead of forwarding the original message
 		msgType = "text"
@@ -192,6 +194,7 @@ func (h *WebhookHandler) resolveContext(ctx context.Context, phone, msgText stri
 		return nil, err
 	}
 	if pending != nil {
+		h.log.Info("pending business selection found", "phone", phone, "options", len(pending))
 		// User is responding to a business selection prompt
 		for _, opt := range pending {
 			if opt.CustomerID == msgText || opt.Name == msgText {
@@ -211,8 +214,7 @@ func (h *WebhookHandler) resolveContext(ctx context.Context, phone, msgText stri
 	}
 
 	if multi != nil {
-		// Multiple businesses — present selection
-		h.session.SetPendingSelection(ctx, phone, multi.Options)
+		h.log.Info("multiple businesses found, prompting selection", "phone", phone, "count", len(multi.Options))
 
 		var options []ListOption
 		for _, opt := range multi.Options {
@@ -221,12 +223,19 @@ func (h *WebhookHandler) resolveContext(ctx context.Context, phone, msgText stri
 				Title: opt.Name,
 			})
 		}
-		h.client.SendInteractiveList(ctx, phone, "Seleccionar negocio", "En cual negocio quieres operar?", options)
+		if err := h.client.SendInteractiveList(ctx, phone, "Seleccionar negocio", "En cual negocio quieres operar?", options); err != nil {
+			h.log.Error("failed to send business selection list", "error", err, "phone", phone)
+			// Don't store pending selection if the list wasn't delivered
+			return nil, nil
+		}
+		// Only persist after successful send
+		h.session.SetPendingSelection(ctx, phone, multi.Options)
 		return nil, nil
 	}
 
 	if biz == nil {
 		// Not registered
+		h.log.Info("user not registered in any business", "phone", phone)
 		if err := h.client.SendText(ctx, phone, "Hola! Aun no estas registrado.\nEscanea el codigo QR en el establecimiento para unirte al programa de fidelidad."); err != nil {
 			h.log.Error("failed to send not-registered message", "error", err, "phone", phone)
 		}
@@ -254,6 +263,7 @@ func (h *WebhookHandler) resolveAndCreateSession(ctx context.Context, phone, cus
 	}
 
 	if roleResult == nil {
+		h.log.Warn("role not resolved", "phone", phone, "customer", customerID)
 		h.client.SendText(ctx, phone, "No se pudo determinar tu rol. Contacta al negocio.")
 		return nil, nil
 	}

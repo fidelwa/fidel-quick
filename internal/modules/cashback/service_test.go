@@ -11,7 +11,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/theluisbolivar/fidel-quick/internal/modules/earnburn"
 )
 
 // --- Mock Repository ---
@@ -43,6 +42,12 @@ func (m *mockRepo) GetProgram(ctx context.Context, customerID string) (*Cashback
 		return m.getProgramFn(ctx, customerID)
 	}
 	return &CashbackProgram{ID: "prog-1", CustomerID: customerID, CashbackRate: 0.05, Active: true}, nil
+}
+func (m *mockRepo) GetProgramByID(ctx context.Context, programID string) (*CashbackProgram, error) {
+	if m.getProgramFn != nil {
+		return m.getProgramFn(ctx, programID)
+	}
+	return &CashbackProgram{ID: programID, CustomerID: "cust-1", CashbackRate: 0.05, Active: true}, nil
 }
 func (m *mockRepo) GetBalance(ctx context.Context, clientID, programID string) (float64, error) {
 	if m.getBalanceFn != nil {
@@ -171,11 +176,15 @@ func (m *mockRepo) WithTx(ctx context.Context, fn func(tx *sql.Tx) error) error 
 // --- Mock Cache ---
 
 type mockCache struct {
-	otps map[string]*OTPData
+	otps             map[string]*OTPData
+	activeIdentities map[string]string
 }
 
 func newMockCache() *mockCache {
-	return &mockCache{otps: make(map[string]*OTPData)}
+	return &mockCache{
+		otps:             make(map[string]*OTPData),
+		activeIdentities: make(map[string]string),
+	}
 }
 
 func (c *mockCache) SetOTP(ctx context.Context, code string, data *OTPData) error {
@@ -200,51 +209,14 @@ func (c *mockCache) DeleteOTP(ctx context.Context, code string) error {
 	delete(c.otps, code)
 	return nil
 }
-
-// --- Mock Identity Cache (shared earnburn.Cache) ---
-
-type mockIdentityCache struct {
-	otps             map[string]*earnburn.OTPData
-	activeIdentities map[string]string
-}
-
-func newMockIdentityCache() *mockIdentityCache {
-	return &mockIdentityCache{
-		otps:             make(map[string]*earnburn.OTPData),
-		activeIdentities: make(map[string]string),
-	}
-}
-
-func (c *mockIdentityCache) SetOTP(ctx context.Context, code string, data *earnburn.OTPData) error {
-	c.otps[code] = data
-	return nil
-}
-func (c *mockIdentityCache) GetOTP(ctx context.Context, code string) (*earnburn.OTPData, error) {
-	if data, ok := c.otps[code]; ok {
-		return data, nil
-	}
-	return nil, nil
-}
-func (c *mockIdentityCache) ConsumeOTP(ctx context.Context, code string) (*earnburn.OTPData, error) {
-	data, ok := c.otps[code]
-	if !ok {
-		return nil, nil
-	}
-	delete(c.otps, code)
-	return data, nil
-}
-func (c *mockIdentityCache) DeleteOTP(ctx context.Context, code string) error {
-	delete(c.otps, code)
-	return nil
-}
-func (c *mockIdentityCache) SetActiveIdentity(ctx context.Context, clientID, code string) error {
+func (c *mockCache) SetActiveIdentity(ctx context.Context, clientID, code string) error {
 	c.activeIdentities[clientID] = code
 	return nil
 }
-func (c *mockIdentityCache) GetActiveIdentity(ctx context.Context, clientID string) (string, error) {
+func (c *mockCache) GetActiveIdentity(ctx context.Context, clientID string) (string, error) {
 	return c.activeIdentities[clientID], nil
 }
-func (c *mockIdentityCache) DeleteActiveIdentity(ctx context.Context, clientID string) error {
+func (c *mockCache) DeleteActiveIdentity(ctx context.Context, clientID string) error {
 	delete(c.activeIdentities, clientID)
 	return nil
 }
@@ -255,8 +227,8 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
-func newTestService(repo *mockRepo, cache *mockCache, idCache *mockIdentityCache) *Service {
-	return NewService(repo, cache, idCache, testLogger())
+func newTestService(repo *mockRepo, cache *mockCache) *Service {
+	return NewService(repo, cache, testLogger())
 }
 
 // --- Tests ---
@@ -272,7 +244,7 @@ func TestAddCashback_Success(t *testing.T) {
 			return 5.0, nil
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	tx, err := svc.AddCashback(context.Background(), AddCashbackReq{
 		ClientID:  "client-1",
@@ -293,7 +265,7 @@ func TestAddCashback_InsufficientAmount(t *testing.T) {
 			return &CashbackProgram{ID: "prog-1", CashbackRate: 0.05}, nil
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	_, err := svc.AddCashback(context.Background(), AddCashbackReq{
 		ClientID: "client-1",
@@ -310,7 +282,7 @@ func TestCheckBalance(t *testing.T) {
 			return 42.50, nil
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	balance, err := svc.CheckBalance(context.Background(), "client-1", "prog-1")
 
@@ -337,7 +309,7 @@ func TestUpdateCashback_Success(t *testing.T) {
 			return 10.0, nil
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	tx, err := svc.UpdateCashback(context.Background(), UpdateCashbackReq{
 		TransactionID:     "tx-1",
@@ -358,7 +330,7 @@ func TestUpdateCashback_Expired(t *testing.T) {
 			}, nil
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	_, err := svc.UpdateCashback(context.Background(), UpdateCashbackReq{
 		TransactionID:     "tx-1",
@@ -385,7 +357,7 @@ func TestRequestRedemption_Success(t *testing.T) {
 		},
 	}
 	cache := newMockCache()
-	svc := newTestService(repo, cache, newMockIdentityCache())
+	svc := newTestService(repo, cache)
 
 	rd, code, err := svc.RequestRedemption(context.Background(), CashbackRedemptionReq{
 		ClientID:  "client-1",
@@ -412,7 +384,7 @@ func TestRequestRedemption_InsufficientBalance(t *testing.T) {
 			return 50.0, nil
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	_, _, err := svc.RequestRedemption(context.Background(), CashbackRedemptionReq{
 		ClientID: "client-1",
@@ -434,7 +406,7 @@ func TestConfirmRedemption_Success(t *testing.T) {
 	}
 	cache := newMockCache()
 	cache.otps["ABC123"] = &OTPData{Type: "cb_redemption"}
-	svc := newTestService(repo, cache, newMockIdentityCache())
+	svc := newTestService(repo, cache)
 
 	rd, err := svc.ConfirmRedemption(context.Background(), "ABC123", "collab-1")
 
@@ -449,7 +421,7 @@ func TestConfirmRedemption_AlreadyConfirmed(t *testing.T) {
 			return &CashbackRedemption{Status: "confirmed"}, nil
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	_, err := svc.ConfirmRedemption(context.Background(), "ABC123", "collab-1")
 
@@ -466,7 +438,7 @@ func TestConfirmRedemption_Expired(t *testing.T) {
 			}, nil
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	_, err := svc.ConfirmRedemption(context.Background(), "ABC123", "collab-1")
 
@@ -476,7 +448,7 @@ func TestConfirmRedemption_Expired(t *testing.T) {
 
 func TestRequestLoadCode(t *testing.T) {
 	cache := newMockCache()
-	svc := newTestService(&mockRepo{}, cache, newMockIdentityCache())
+	svc := newTestService(&mockRepo{}, cache)
 
 	code, err := svc.RequestLoadCode(context.Background(), "client-1", "cust-1")
 
@@ -484,13 +456,13 @@ func TestRequestLoadCode(t *testing.T) {
 	assert.Equal(t, 6, len(code))
 
 	otpData := cache.otps[code]
-	assert.Equal(t, "cb_load_points", otpData.Type)
+	assert.Equal(t, "cb_identity", otpData.Type)
 }
 
 func TestValidateLoadCode_Success(t *testing.T) {
 	cache := newMockCache()
-	cache.otps["ABC123"] = &OTPData{ClientID: "client-1", Type: "cb_load_points"}
-	svc := newTestService(&mockRepo{}, cache, newMockIdentityCache())
+	cache.otps["ABC123"] = &OTPData{ClientID: "client-1", Type: "cb_identity"}
+	svc := newTestService(&mockRepo{}, cache)
 
 	data, err := svc.ValidateLoadCode(context.Background(), "ABC123")
 
@@ -498,13 +470,13 @@ func TestValidateLoadCode_Success(t *testing.T) {
 	assert.Equal(t, "client-1", data.ClientID)
 
 	_, ok := cache.otps["ABC123"]
-	assert.False(t, ok) // consumed
+	assert.True(t, ok) // identity OTP is multi-use, not consumed
 }
 
 func TestValidateLoadCode_WrongType(t *testing.T) {
 	cache := newMockCache()
 	cache.otps["ABC123"] = &OTPData{Type: "cb_redemption"}
-	svc := newTestService(&mockRepo{}, cache, newMockIdentityCache())
+	svc := newTestService(&mockRepo{}, cache)
 
 	_, err := svc.ValidateLoadCode(context.Background(), "ABC123")
 
@@ -513,23 +485,23 @@ func TestValidateLoadCode_WrongType(t *testing.T) {
 }
 
 func TestRequestIdentityOTP(t *testing.T) {
-	idCache := newMockIdentityCache()
-	svc := newTestService(&mockRepo{}, newMockCache(), idCache)
+	cache := newMockCache()
+	svc := newTestService(&mockRepo{}, cache)
 
 	code, err := svc.RequestIdentityOTP(context.Background(), "client-1", "cust-1")
 
 	require.NoError(t, err)
 	assert.Equal(t, 6, len(code))
 
-	otpData := idCache.otps[code]
-	assert.Equal(t, "identity", otpData.Type)
-	assert.Equal(t, code, idCache.activeIdentities["client-1"])
+	otpData := cache.otps[code]
+	assert.Equal(t, "cb_identity", otpData.Type)
+	assert.Equal(t, code, cache.activeIdentities["client-1"])
 }
 
 func TestValidateIdentityOTP_Success(t *testing.T) {
-	idCache := newMockIdentityCache()
-	idCache.otps["ABC123"] = &earnburn.OTPData{ClientID: "client-1", Type: "identity"}
-	svc := newTestService(&mockRepo{}, newMockCache(), idCache)
+	cache := newMockCache()
+	cache.otps["ABC123"] = &OTPData{ClientID: "client-1", Type: "cb_identity"}
+	svc := newTestService(&mockRepo{}, cache)
 
 	data, err := svc.ValidateIdentityOTP(context.Background(), "ABC123")
 
@@ -537,7 +509,7 @@ func TestValidateIdentityOTP_Success(t *testing.T) {
 	assert.Equal(t, "client-1", data.ClientID)
 
 	// Should NOT be consumed
-	_, ok := idCache.otps["ABC123"]
+	_, ok := cache.otps["ABC123"]
 	assert.True(t, ok)
 }
 
@@ -550,7 +522,7 @@ func TestSubmitFeedback(t *testing.T) {
 			return nil
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	err := svc.SubmitFeedback(context.Background(), "client-1", "cust-1", "Excelente")
 
@@ -564,7 +536,7 @@ func TestGetProgram_NotFound(t *testing.T) {
 			return nil, sql.ErrNoRows
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	_, err := svc.GetProgram(context.Background(), "cust-1")
 
@@ -578,7 +550,7 @@ func TestListPrograms(t *testing.T) {
 			return []CashbackProgram{{ID: "p-1"}, {ID: "p-2"}}, nil
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	programs, err := svc.ListPrograms(context.Background(), "cust-1")
 
@@ -593,7 +565,7 @@ func TestCreateProgram(t *testing.T) {
 			return nil
 		},
 	}
-	svc := newTestService(repo, newMockCache(), newMockIdentityCache())
+	svc := newTestService(repo, newMockCache())
 
 	p := &CashbackProgram{CustomerID: "cust-1", Name: "Test CB"}
 	err := svc.CreateProgram(context.Background(), p)

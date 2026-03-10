@@ -11,6 +11,7 @@ import (
 
 type Repository interface {
 	GetProgram(ctx context.Context, customerID string) (*Program, error)
+	GetProgramByID(ctx context.Context, programID string) (*Program, error)
 	GetBalance(ctx context.Context, clientID, programID string) (int, error)
 	UpsertBalance(ctx context.Context, clientID, programID string, delta int) (int, error)
 	CreateTransaction(ctx context.Context, tx *Transaction) error
@@ -75,6 +76,18 @@ func (r *PostgresRepository) GetProgram(ctx context.Context, customerID string) 
 	return &p, nil
 }
 
+func (r *PostgresRepository) GetProgramByID(ctx context.Context, programID string) (*Program, error) {
+	var p Program
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, customer_id, type, name, points_ratio, active
+		 FROM programs WHERE id = $1`, programID,
+	).Scan(&p.ID, &p.CustomerID, &p.Type, &p.Name, &p.PointsRatio, &p.Active)
+	if err != nil {
+		return nil, fmt.Errorf("get program by id: %w", err)
+	}
+	return &p, nil
+}
+
 func (r *PostgresRepository) GetBalance(ctx context.Context, clientID, programID string) (int, error) {
 	var balance int
 	err := r.db.QueryRowContext(ctx,
@@ -109,7 +122,7 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *Transact
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO points_transactions
 		(id, client_id, program_id, collaborator_id, type, amount, balance_after, invoice_url, description, manual_entry, correction_reason, correction_evidence_url, correctable_until)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, NULLIF($11, ''), NULLIF($12, ''), $13)
+		VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, NULLIF($11, ''), NULLIF($12, ''), $13)
 	`, tx.ID, tx.ClientID, tx.ProgramID, tx.CollaboratorID, tx.Type, tx.Amount, tx.BalanceAfter,
 		tx.InvoiceURL, tx.Description, tx.ManualEntry, tx.CorrectionReason, tx.CorrectionEvidenceURL, tx.CorrectableUntil)
 	if err != nil {
@@ -357,7 +370,7 @@ func (r *PostgresRepository) AddPointsTx(ctx context.Context, t *Transaction) (i
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO points_transactions
 			(id, client_id, program_id, collaborator_id, type, amount, balance_after, invoice_url, description, manual_entry, correctable_until)
-			VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, $11)
+			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, $11)
 		`, t.ID, t.ClientID, t.ProgramID, t.CollaboratorID, t.Type, t.Amount, t.BalanceAfter,
 			t.InvoiceURL, t.Description, t.ManualEntry, t.CorrectableUntil)
 		return err
@@ -650,7 +663,7 @@ func (r *PostgresRepository) AdjustPointsTx(ctx context.Context, t *Transaction)
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO points_transactions
 			(id, client_id, program_id, collaborator_id, type, amount, balance_after, correction_reason, correction_evidence_url)
-			VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''))
+			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''))
 		`, t.ID, t.ClientID, t.ProgramID, t.CollaboratorID, t.Type, t.Amount, t.BalanceAfter,
 			t.CorrectionReason, t.CorrectionEvidenceURL)
 		return err

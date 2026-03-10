@@ -32,9 +32,8 @@ func NewService(repo Repository, cache Cache, log *slog.Logger) *Service {
 
 // AddPoints calculates points from purchase amount and credits them.
 func (s *Service) AddPoints(ctx context.Context, req AddPointsReq) (*Transaction, error) {
-	program, err := s.repo.GetProgram(ctx, req.ClientID)
+	program, err := s.repo.GetProgramByID(ctx, req.ProgramID)
 	if err != nil {
-		// Try with the program ID if client-based lookup fails
 		return nil, fmt.Errorf("get program: %w", err)
 	}
 
@@ -206,17 +205,17 @@ func (s *Service) ConfirmRedemption(ctx context.Context, code, collaboratorID st
 	// Try Redis first (fast path)
 	otpData, err := s.cache.ConsumeOTP(ctx, code)
 	if err != nil {
-		s.log.Error("redis consume failed, falling back to postgres", "error", err)
+		s.log.Error("redis consume failed, falling back to postgres", "error", err, "code", code)
 	}
 
 	if otpData != nil && otpData.Type != "redemption" {
-		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
+		return nil, fmt.Errorf("codigo invalido (tipo incorrecto) [code=%s, got_type=%s]", code, otpData.Type)
 	}
 
 	// Always confirm via Postgres (source of truth)
 	rd, err := s.repo.GetRedemptionByCode(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("codigo de canje no encontrado")
+		return nil, fmt.Errorf("codigo de canje no encontrado [code=%s]", code)
 	}
 
 	if rd.Status != "pending" {
@@ -261,13 +260,13 @@ func (s *Service) RequestLoadPointsCode(ctx context.Context, clientID, customerI
 func (s *Service) ValidateLoadPointsCode(ctx context.Context, code string) (*OTPData, error) {
 	data, err := s.cache.ConsumeOTP(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("consume load points code: %w", err)
+		return nil, fmt.Errorf("consume load points code [code=%s]: %w", code, err)
 	}
 	if data == nil {
-		return nil, fmt.Errorf("codigo invalido o expirado")
+		return nil, fmt.Errorf("codigo invalido o expirado [code=%s]", code)
 	}
 	if data.Type != "load_points" {
-		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
+		return nil, fmt.Errorf("codigo invalido (tipo incorrecto) [code=%s, got_type=%s]", code, data.Type)
 	}
 	return data, nil
 }
@@ -301,13 +300,13 @@ func (s *Service) RequestIdentityOTP(ctx context.Context, clientID, customerID s
 func (s *Service) ValidateIdentityOTP(ctx context.Context, code string) (*OTPData, error) {
 	data, err := s.cache.GetOTP(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("get identity otp: %w", err)
+		return nil, fmt.Errorf("get identity otp [code=%s]: %w", code, err)
 	}
 	if data == nil {
-		return nil, fmt.Errorf("codigo invalido o expirado")
+		return nil, fmt.Errorf("codigo invalido o expirado [code=%s]", code)
 	}
 	if data.Type != "identity" {
-		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
+		return nil, fmt.Errorf("codigo invalido (tipo incorrecto) [code=%s, got_type=%s]", code, data.Type)
 	}
 	return data, nil
 }

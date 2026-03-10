@@ -8,6 +8,7 @@ export interface Customer {
   description: string
   welcome_message: string
   active: boolean
+  onboarding_completed: boolean
 }
 
 export interface Program {
@@ -111,6 +112,16 @@ export interface Balance {
   client_id: string
   program_id: string
   balance: number
+}
+
+export interface OnboardingRegisterRequest {
+  name: string
+  slug: string
+  phone: string
+  description?: string
+  logo_url?: string
+  admin_email: string
+  admin_password: string
 }
 
 export interface AuthResponse {

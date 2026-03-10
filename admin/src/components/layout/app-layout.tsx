@@ -1,16 +1,31 @@
 import { useState } from "react"
 import { Outlet, Navigate } from "react-router-dom"
 import { useAuth } from "@/context/auth-context"
+import { useCustomer } from "@/hooks/use-customer"
 import { Sidebar } from "./sidebar"
 import { Header } from "./header"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export function AppLayout() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, customerId } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { data: customer, isLoading: customerLoading } = useCustomer(customerId)
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />
+  }
+
+  if (customerLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Skeleton className="h-12 w-48" />
+      </div>
+    )
+  }
+
+  if (customer && !customer.onboarding_completed) {
+    return <Navigate to="/onboarding" replace />
   }
 
   return (

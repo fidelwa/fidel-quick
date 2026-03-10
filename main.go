@@ -15,9 +15,11 @@ import (
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
 	"github.com/theluisbolivar/fidel-quick/internal/modules/cashback"
 	"github.com/theluisbolivar/fidel-quick/internal/modules/earnburn"
+	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/cache"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/db"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/logger"
+	"github.com/theluisbolivar/fidel-quick/internal/platform/storage"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/whatsapp"
 	"github.com/theluisbolivar/fidel-quick/internal/resolver"
 	"github.com/theluisbolivar/fidel-quick/internal/session"
@@ -73,7 +75,7 @@ func main() {
 	// Cashback module
 	cbRepo := cashback.NewPostgresRepository(database)
 	cbCache := cashback.NewRedisCache(redisClient)
-	cbService := cashback.NewService(cbRepo, cbCache, ebCache, log)
+	cbService := cashback.NewService(cbRepo, cbCache, log)
 	cbAPI := cashback.NewAPIHandler(cbService)
 	cbModule := cashback.NewModule(cbService, cbAPI)
 	registry.Register(cbModule)
@@ -81,9 +83,35 @@ func main() {
 	// WhatsApp client
 	waClient := whatsapp.NewClient(cfg.WhatsAppAPIToken, cfg.WhatsAppPhoneNumberID)
 
+	// S3/MinIO storage
+	s3Client, err := storage.NewS3Client(
+		stripEndpoint(cfg.S3Endpoint),
+		cfg.AWSAccessKeyID,
+		cfg.AWSSecretAccessKey,
+		cfg.S3Bucket,
+		cfg.S3Region,
+		!strings.HasPrefix(cfg.S3Endpoint, "http://"),
+	)
+	if err != nil {
+		log.Error("failed to connect to S3/MinIO", "error", err)
+		os.Exit(1)
+	}
+	log.Info("connected to S3/MinIO", "endpoint", cfg.S3Endpoint)
+
+	// Invoice photo processor (Gemini AI + S3 + WhatsApp download)
+	var photoProcessor flow.PhotoProcessor
+	if cfg.GeminiAPIKey != "" {
+		geminiClient := ai.NewGeminiClient(cfg.GeminiAPIKey)
+		invoiceProcessor := ai.NewInvoiceProcessor(waClient, geminiClient, s3Client, log)
+		photoProcessor = &photoAdapter{processor: invoiceProcessor}
+		log.Info("invoice processor enabled (Gemini + S3)")
+	} else {
+		log.Warn("GEMINI_API_KEY not set — photo processing disabled")
+	}
+
 	// Flow engine (needs a MessageSender adapter for the WhatsApp client)
 	flowStore := flow.NewStateStore(redisClient)
-	flowEngine := flow.NewEngine(registry, flowStore, &waAdapter{client: waClient}, log)
+	flowEngine := flow.NewEngine(registry, flowStore, &waAdapter{client: waClient}, photoProcessor, log)
 
 	// WhatsApp webhook handler
 	webhookHandler := whatsapp.NewWebhookHandler(
@@ -131,6 +159,23 @@ func (a *waAdapter) SendInteractiveList(ctx context.Context, to, header, body st
 		waOpts[i] = whatsapp.ListOption{ID: o.ID, Title: o.Title, Description: o.Description}
 	}
 	return a.client.SendInteractiveList(ctx, to, header, body, waOpts)
+}
+
+// photoAdapter wraps *ai.InvoiceProcessor to satisfy flow.PhotoProcessor.
+type photoAdapter struct {
+	processor *ai.InvoiceProcessor
+}
+
+func (a *photoAdapter) ProcessPhoto(ctx context.Context, imageURL string) (*flow.PhotoProcessResult, error) {
+	result, err := a.processor.ProcessPhoto(ctx, imageURL)
+	if err != nil {
+		return nil, err
+	}
+	return &flow.PhotoProcessResult{
+		StorageURL: result.StorageURL,
+		Amount:     result.Amount,
+		Currency:   result.Currency,
+	}, nil
 }
 
 // stripEndpoint removes protocol prefix for MinIO client.

@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	cbIdentityTTL   = 15 * time.Minute
 	cbRedemptionTTL = 1 * time.Hour
 	cbLoadPointsTTL = 15 * time.Minute
 )
@@ -27,6 +28,9 @@ type Cache interface {
 	GetOTP(ctx context.Context, code string) (*OTPData, error)
 	ConsumeOTP(ctx context.Context, code string) (*OTPData, error)
 	DeleteOTP(ctx context.Context, code string) error
+	SetActiveIdentity(ctx context.Context, clientID, code string) error
+	GetActiveIdentity(ctx context.Context, clientID string) (string, error)
+	DeleteActiveIdentity(ctx context.Context, clientID string) error
 }
 
 // RedisCache implements Cache.
@@ -84,10 +88,29 @@ func (c *RedisCache) DeleteOTP(ctx context.Context, code string) error {
 	return c.client.Del(ctx, otpKey(code)).Err()
 }
 
-func otpKey(code string) string { return "otp:" + code }
+func (c *RedisCache) SetActiveIdentity(ctx context.Context, clientID, code string) error {
+	return c.client.Set(ctx, cbActiveIdentityKey(clientID), code, cbIdentityTTL).Err()
+}
+
+func (c *RedisCache) GetActiveIdentity(ctx context.Context, clientID string) (string, error) {
+	code, err := c.client.Get(ctx, cbActiveIdentityKey(clientID)).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return code, err
+}
+
+func (c *RedisCache) DeleteActiveIdentity(ctx context.Context, clientID string) error {
+	return c.client.Del(ctx, cbActiveIdentityKey(clientID)).Err()
+}
+
+func otpKey(code string) string                    { return "otp:" + code }
+func cbActiveIdentityKey(clientID string) string    { return "cb:identity:" + clientID }
 
 func cbOtpTTL(otpType string) time.Duration {
 	switch otpType {
+	case "cb_identity":
+		return cbIdentityTTL
 	case "cb_redemption":
 		return cbRedemptionTTL
 	case "cb_load_points":

@@ -13,6 +13,8 @@ import { CashbackDetailPage } from "@/pages/cashback/cashback-detail"
 import { CollaboratorsListPage } from "@/pages/collaborators/collaborators-list"
 import { ClientLookupPage } from "@/pages/clients/client-lookup"
 import { FeedbackListPage } from "@/pages/feedback/feedback-list"
+import { RegistroPage } from "@/pages/registro"
+import { OnboardingLayout } from "@/pages/onboarding/onboarding-layout"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,6 +32,8 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/registro" element={<RegistroPage />} />
+            <Route path="/onboarding" element={<OnboardingLayout />} />
             <Route element={<AppLayout />}>
               <Route index element={<DashboardPage />} />
               <Route path="perfil" element={<ProfilePage />} />

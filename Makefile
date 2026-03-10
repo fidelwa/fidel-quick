@@ -12,7 +12,7 @@ infra-down: ## Stop infrastructure
 	docker compose --profile infra down
 
 .PHONY: full-up
-full-up: ## Start all services including Go app
+full-up: ## Start all services (infra + backend + admin) containerized
 	docker compose --profile full up -d --build
 
 .PHONY: full-down
@@ -100,7 +100,7 @@ create-admin: ## Create admin account (usage: make create-admin EMAIL=tu@email.c
 ## Full Stack
 
 .PHONY: start-all
-start-all: ## One command: infra + migrate + backend + admin frontend
+start-all: ## One command: infra + migrate + backend + admin frontend (native)
 	@echo "Starting infrastructure..."
 	@docker compose --profile infra up -d
 	@echo "Waiting for Postgres..."
@@ -112,6 +112,20 @@ start-all: ## One command: infra + migrate + backend + admin frontend
 	go run main.go & \
 	cd admin && npm run dev & \
 	wait
+
+.PHONY: start-docker
+start-docker: ## One command: everything containerized (build + run)
+	@echo "Building and starting all containers..."
+	docker compose --profile full up -d --build
+	@echo "Waiting for Postgres..."
+	@until docker compose exec postgres pg_isready -U loyalty -q 2>/dev/null; do sleep 1; done
+	@echo "Running migrations..."
+	@migrate -path $(MIGRATIONS_PATH) -database "$(DATABASE_URL)" up
+	@echo ""
+	@echo "All services running:"
+	@echo "  Admin:  http://localhost:3000"
+	@echo "  API:    http://localhost:8080"
+	@echo "  MinIO:  http://localhost:9001"
 
 ## Help
 

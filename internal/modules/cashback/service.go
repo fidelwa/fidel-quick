@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
-	"github.com/theluisbolivar/fidel-quick/internal/modules/earnburn"
 )
 
 const (
@@ -22,19 +21,18 @@ const (
 )
 
 type Service struct {
-	repo          Repository
-	cache         Cache
-	identityCache earnburn.Cache // shared identity OTP cache
-	log           *slog.Logger
+	repo  Repository
+	cache Cache
+	log   *slog.Logger
 }
 
-func NewService(repo Repository, cache Cache, identityCache earnburn.Cache, log *slog.Logger) *Service {
-	return &Service{repo: repo, cache: cache, identityCache: identityCache, log: log}
+func NewService(repo Repository, cache Cache, log *slog.Logger) *Service {
+	return &Service{repo: repo, cache: cache, log: log}
 }
 
 // AddCashback calculates cashback from purchase amount and credits it.
 func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*CashbackTransaction, error) {
-	program, err := s.repo.GetProgram(ctx, req.ClientID)
+	program, err := s.repo.GetProgramByID(ctx, req.ProgramID)
 	if err != nil {
 		return nil, fmt.Errorf("get cashback program: %w", err)
 	}
@@ -103,7 +101,7 @@ func (s *Service) UpdateCashback(ctx context.Context, req UpdateCashbackReq) (*C
 	}
 
 	// Get program to recalculate cashback
-	program, err := s.repo.GetProgram(ctx, original.ClientID)
+	program, err := s.repo.GetProgramByID(ctx, original.ProgramID)
 	if err != nil {
 		return nil, fmt.Errorf("get program for correction: %w", err)
 	}
@@ -216,17 +214,17 @@ func (s *Service) ConfirmRedemption(ctx context.Context, code, collaboratorID st
 	// Try Redis first (fast path)
 	otpData, err := s.cache.ConsumeOTP(ctx, code)
 	if err != nil {
-		s.log.Error("redis consume failed, falling back to postgres", "error", err)
+		s.log.Error("redis consume failed, falling back to postgres", "error", err, "code", code)
 	}
 
 	if otpData != nil && otpData.Type != "cb_redemption" {
-		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
+		return nil, fmt.Errorf("codigo invalido (tipo incorrecto) [code=%s, got_type=%s]", code, otpData.Type)
 	}
 
 	// Always confirm via Postgres (source of truth)
 	rd, err := s.repo.GetRedemptionByCode(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("codigo de canje no encontrado")
+		return nil, fmt.Errorf("codigo de canje no encontrado [code=%s]", code)
 	}
 
 	if rd.Status != "pending" {
@@ -252,72 +250,53 @@ func (s *Service) ConfirmRedemption(ctx context.Context, code, collaboratorID st
 	return rd, nil
 }
 
-// RequestLoadCode generates a temporary code for client→collaborator handoff.
+// RequestLoadCode generates a cashback identity code (multi-use, 15 min).
+// This single code is used by all collaborator flows.
 func (s *Service) RequestLoadCode(ctx context.Context, clientID, customerID string) (string, error) {
+	return s.RequestIdentityOTP(ctx, clientID, customerID)
+}
+
+// ValidateLoadCode checks a cashback identity code (multi-use, does not consume).
+func (s *Service) ValidateLoadCode(ctx context.Context, code string) (*OTPData, error) {
+	return s.ValidateIdentityOTP(ctx, code)
+}
+
+// RequestIdentityOTP generates a cashback-specific identity code for a client.
+func (s *Service) RequestIdentityOTP(ctx context.Context, clientID, customerID string) (string, error) {
+	// Invalidate previous OTP
+	oldCode, _ := s.cache.GetActiveIdentity(ctx, clientID)
+	if oldCode != "" {
+		s.cache.DeleteOTP(ctx, oldCode)
+		s.cache.DeleteActiveIdentity(ctx, clientID)
+	}
+
 	code := generateCode(otpCodeLength)
 	otpData := &OTPData{
 		ClientID:   clientID,
 		CustomerID: customerID,
-		Type:       "cb_load_points",
+		Type:       "cb_identity",
 		Metadata:   map[string]string{},
 	}
 	if err := s.cache.SetOTP(ctx, code, otpData); err != nil {
-		return "", fmt.Errorf("set cb load points otp: %w", err)
+		return "", fmt.Errorf("set cb identity otp: %w", err)
+	}
+	if err := s.cache.SetActiveIdentity(ctx, clientID, code); err != nil {
+		s.log.Error("failed to set cb active identity tracker", "error", err)
 	}
 	return code, nil
 }
 
-// ValidateLoadCode checks and consumes the load code.
-func (s *Service) ValidateLoadCode(ctx context.Context, code string) (*OTPData, error) {
-	data, err := s.cache.ConsumeOTP(ctx, code)
+// ValidateIdentityOTP checks a cashback identity OTP (multi-use, does not consume).
+func (s *Service) ValidateIdentityOTP(ctx context.Context, code string) (*OTPData, error) {
+	data, err := s.cache.GetOTP(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("consume load code: %w", err)
+		return nil, fmt.Errorf("get cb identity otp [code=%s]: %w", code, err)
 	}
 	if data == nil {
-		return nil, fmt.Errorf("codigo invalido o expirado")
+		return nil, fmt.Errorf("codigo invalido o expirado [code=%s]", code)
 	}
-	if data.Type != "cb_load_points" {
-		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
-	}
-	return data, nil
-}
-
-// RequestIdentityOTP delegates to the shared earnburn identity cache.
-func (s *Service) RequestIdentityOTP(ctx context.Context, clientID, customerID string) (string, error) {
-	// Invalidate previous OTP
-	oldCode, _ := s.identityCache.GetActiveIdentity(ctx, clientID)
-	if oldCode != "" {
-		s.identityCache.DeleteOTP(ctx, oldCode)
-		s.identityCache.DeleteActiveIdentity(ctx, clientID)
-	}
-
-	code := generateCode(otpCodeLength)
-	otpData := &earnburn.OTPData{
-		ClientID:   clientID,
-		CustomerID: customerID,
-		Type:       "identity",
-		Metadata:   map[string]string{},
-	}
-	if err := s.identityCache.SetOTP(ctx, code, otpData); err != nil {
-		return "", fmt.Errorf("set identity otp: %w", err)
-	}
-	if err := s.identityCache.SetActiveIdentity(ctx, clientID, code); err != nil {
-		s.log.Error("failed to set active identity tracker", "error", err)
-	}
-	return code, nil
-}
-
-// ValidateIdentityOTP checks an identity OTP (multi-use, does not consume).
-func (s *Service) ValidateIdentityOTP(ctx context.Context, code string) (*earnburn.OTPData, error) {
-	data, err := s.identityCache.GetOTP(ctx, code)
-	if err != nil {
-		return nil, fmt.Errorf("get identity otp: %w", err)
-	}
-	if data == nil {
-		return nil, fmt.Errorf("codigo invalido o expirado")
-	}
-	if data.Type != "identity" {
-		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
+	if data.Type != "cb_identity" {
+		return nil, fmt.Errorf("codigo invalido (tipo incorrecto) [code=%s, got_type=%s]", code, data.Type)
 	}
 	return data, nil
 }
