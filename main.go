@@ -15,6 +15,8 @@ import (
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
 	"github.com/theluisbolivar/fidel-quick/internal/modules/cashback"
 	"github.com/theluisbolivar/fidel-quick/internal/modules/earnburn"
+	"github.com/theluisbolivar/fidel-quick/internal/onboarding"
+	sisfiPkg "github.com/theluisbolivar/fidel-quick/internal/sisfi"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/cache"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/db"
@@ -127,14 +129,22 @@ func main() {
 
 	// Admin auth
 	adminRepo := admin.NewPostgresRepository(database)
-	adminService := admin.NewService(adminRepo, cfg.JWTSecret)
+	adminService := admin.NewService(adminRepo, cfg.JWTSecret, cfg.GoogleClientID)
 	adminAPI := admin.NewAPIHandler(adminService)
+
+	// Onboarding
+	onboardingRepo := onboarding.NewRepository(database)
+	onboardingAPI := onboarding.NewAPIHandler(onboardingRepo)
+
+	// Sisfi (loyalty system catalog)
+	sisfiRepo := sisfiPkg.NewRepository(database)
+	sisfiAPI := sisfiPkg.NewAPIHandler(sisfiRepo)
 
 	// Landing page
 	landingHandler := landing.NewHandler(resolverRepo, log, cfg.WhatsAppDisplayPhone)
 
 	// Router (API + landing + webhook)
-	r := api.SetupRouter(cfg.BearerToken, cfg.JWTSecret, landingHandler, webhookHandler, registry, adminAPI, log, cfg.IsDevelopment())
+	r := api.SetupRouter(cfg.BearerToken, cfg.JWTSecret, landingHandler, webhookHandler, registry, adminAPI, onboardingAPI, sisfiAPI, log, cfg.IsDevelopment())
 
 	log.Info("server starting", "port", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

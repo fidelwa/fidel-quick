@@ -14,6 +14,7 @@ type Config struct {
 	AWSSecretAccessKey    string
 	AnthropicAPIKey       string
 	GeminiAPIKey          string
+	GoogleClientID        string
 	WhatsAppVerifyToken   string
 	WhatsAppAPIToken      string
 	WhatsAppPhoneNumberID string
@@ -36,6 +37,7 @@ func Load() *Config {
 		AWSSecretAccessKey:    getEnv("AWS_SECRET_ACCESS_KEY", ""),
 		AnthropicAPIKey:       getEnv("ANTHROPIC_API_KEY", ""),
 		GeminiAPIKey:          getEnv("GEMINI_API_KEY", ""),
+		GoogleClientID:        getEnv("GOOGLE_CLIENT_ID", ""),
 		WhatsAppVerifyToken:   getEnv("WHATSAPP_VERIFY_TOKEN", ""),
 		WhatsAppAPIToken:      getEnv("WHATSAPP_API_TOKEN", ""),
 		WhatsAppPhoneNumberID: getEnv("WHATSAPP_PHONE_NUMBER_ID", ""),

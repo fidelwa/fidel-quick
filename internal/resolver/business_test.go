@@ -71,7 +71,6 @@ func (m *mockRepo) GetActiveProgramTypes(ctx context.Context, customerID string)
 	}
 	return nil, nil
 }
-
 // --- Business Resolver Tests ---
 
 func TestResolve_Deeplink_ExistingUser(t *testing.T) {

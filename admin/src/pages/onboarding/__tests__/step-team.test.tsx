@@ -38,18 +38,22 @@ describe("StepTeam", () => {
     expect(screen.getByText("Registra a tu equipo")).toBeInTheDocument()
   })
 
-  it("shows empty state when no collaborators", () => {
+  it("shows WhatsApp notice", () => {
     renderWithProviders(<StepTeam {...defaultProps} />)
-    expect(screen.getByText("Agrega a tu primer colaborador para comenzar")).toBeInTheDocument()
+    expect(screen.getByText(/WhatsApp activo/)).toBeInTheDocument()
   })
 
-  it("shows collaborator list when collaborators exist", () => {
+  it("shows empty state when no collaborators", () => {
+    renderWithProviders(<StepTeam {...defaultProps} />)
+    expect(screen.getByText("Agrega a tu primer colaborador")).toBeInTheDocument()
+  })
+
+  it("shows collaborator in table when collaborators exist", () => {
     renderWithProviders(
       <StepTeam {...defaultProps} collaborators={[mockCollaborator]} />
     )
     expect(screen.getByText("Juan Perez")).toBeInTheDocument()
     expect(screen.getByText("+525512345678")).toBeInTheDocument()
-    expect(screen.getByText("Registrado")).toBeInTheDocument()
   })
 
   it("shows multiple collaborators", () => {
@@ -64,10 +68,23 @@ describe("StepTeam", () => {
     expect(screen.getByText("Maria Lopez")).toBeInTheDocument()
   })
 
+  it("shows collaborator count", () => {
+    renderWithProviders(
+      <StepTeam {...defaultProps} collaborators={[mockCollaborator]} />
+    )
+    expect(screen.getByText(/1 colaborador registrado/)).toBeInTheDocument()
+  })
+
+  it("has country code selector", () => {
+    renderWithProviders(<StepTeam {...defaultProps} />)
+    const select = screen.getByDisplayValue("MX (+52)")
+    expect(select).toBeInTheDocument()
+  })
+
   it("has input fields for name and phone", () => {
     renderWithProviders(<StepTeam {...defaultProps} />)
     expect(screen.getByPlaceholderText("Juan Perez")).toBeInTheDocument()
-    expect(screen.getByPlaceholderText("+525512345678")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText("5512345678")).toBeInTheDocument()
   })
 
   it("has navigation buttons", () => {
@@ -76,9 +93,8 @@ describe("StepTeam", () => {
     expect(screen.getByRole("button", { name: "Siguiente" })).toBeInTheDocument()
   })
 
-  it("has add button (Plus icon)", () => {
+  it("has add button", () => {
     renderWithProviders(<StepTeam {...defaultProps} />)
-    // The add button has a Plus icon — there should be buttons beyond nav
     const buttons = screen.getAllByRole("button")
     expect(buttons.length).toBeGreaterThanOrEqual(3) // prev + next + add
   })
@@ -88,12 +104,22 @@ describe("StepTeam", () => {
     renderWithProviders(<StepTeam {...defaultProps} />)
 
     const nameInput = screen.getByPlaceholderText("Juan Perez")
-    const phoneInput = screen.getByPlaceholderText("+525512345678")
+    const phoneInput = screen.getByPlaceholderText("5512345678")
 
     await user.type(nameInput, "Ana Garcia")
-    await user.type(phoneInput, "+525511112222")
+    await user.type(phoneInput, "5511112222")
 
     expect(nameInput).toHaveValue("Ana Garcia")
-    expect(phoneInput).toHaveValue("+525511112222")
+    expect(phoneInput).toHaveValue("5511112222")
+  })
+
+  it("strips non-digit characters from phone input", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<StepTeam {...defaultProps} />)
+
+    const phoneInput = screen.getByPlaceholderText("5512345678")
+    await user.type(phoneInput, "55-1234-5678")
+
+    expect(phoneInput).toHaveValue("5512345678")
   })
 })

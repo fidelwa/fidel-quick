@@ -33,7 +33,7 @@ func TestListPrograms_API(t *testing.T) {
 	repo := &mockRepo{
 		listProgramsFn: func(_ context.Context, _ string) ([]CashbackProgram, error) {
 			return []CashbackProgram{
-				{ID: "p-1", Name: "Cashback 5%", CashbackRate: 0.05},
+				{CustomerSisfiID: "cs-1", Name: "Cashback 5%", CashbackRate: 0.05},
 			}, nil
 		},
 	}
@@ -50,52 +50,6 @@ func TestListPrograms_API(t *testing.T) {
 	assert.Len(t, programs, 1)
 }
 
-func TestCreateProgram_API(t *testing.T) {
-	repo := &mockRepo{
-		createProgramFn: func(_ context.Context, p *CashbackProgram) error {
-			p.ID = "new-prog"
-			return nil
-		},
-	}
-	r := setupAPIRouter(repo)
-
-	body := `{"customer_id":"cust-1","name":"Cashback 10%","cashback_rate":0.1}`
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/cashback-programs", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, 201, w.Code)
-
-	var resp map[string]string
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, "new-prog", resp["id"])
-}
-
-func TestCreateProgram_API_MissingFields(t *testing.T) {
-	r := setupAPIRouter(&mockRepo{})
-
-	body := `{"cashback_rate":0.1}`
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/cashback-programs", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, 400, w.Code)
-}
-
-func TestUpdateProgram_API(t *testing.T) {
-	r := setupAPIRouter(&mockRepo{})
-
-	body := `{"name":"Updated CB","cashback_rate":0.08}`
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/v1/cashback-programs/prog-1", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, 200, w.Code)
-}
-
 func TestCreateReward_API(t *testing.T) {
 	repo := &mockRepo{
 		createRewardAdminFn: func(_ context.Context, _ string, r *CashbackReward) error {
@@ -107,7 +61,7 @@ func TestCreateReward_API(t *testing.T) {
 
 	body := `{"name":"Descuento $5","cost":5.0}`
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/cashback-programs/prog-1/rewards", strings.NewReader(body))
+	req, _ := http.NewRequest("POST", "/api/v1/customer-sisfi/cs-1/rewards", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -125,7 +79,7 @@ func TestListRewards_API(t *testing.T) {
 	r := setupAPIRouter(repo)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/cashback-programs/prog-1/rewards", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/customer-sisfi/cs-1/rewards", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
@@ -144,7 +98,7 @@ func TestGetClientBalance_API(t *testing.T) {
 	r := setupAPIRouter(repo)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/cashback-programs/prog-1/clients/client-1/balance", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/customer-sisfi/cs-1/clients/client-1/balance", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
@@ -165,7 +119,7 @@ func TestGetClientTransactions_API(t *testing.T) {
 	r := setupAPIRouter(repo)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/cashback-programs/prog-1/clients/client-1/transactions", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/customer-sisfi/cs-1/clients/client-1/transactions", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
@@ -180,7 +134,7 @@ func TestUpdateReward_API(t *testing.T) {
 
 	body := `{"name":"Updated","cost":10.0}`
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/v1/cashback-programs/prog-1/rewards/rw-1", strings.NewReader(body))
+	req, _ := http.NewRequest("PUT", "/api/v1/customer-sisfi/cs-1/rewards/rw-1", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 

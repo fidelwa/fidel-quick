@@ -4,22 +4,22 @@ import { useOnboarding } from "../use-onboarding"
 import type { Program, CashbackProgram, Reward, CashbackReward, Collaborator } from "@/types"
 
 const mockProgram: Program = {
-  id: "p1", customer_id: "c1", type: "earn-burn",
+  id: "p1", customer_id: "c1",
   name: "Points", points_ratio: 100, active: true,
 }
 
 const mockCashbackProgram: CashbackProgram = {
-  id: "cb1", customer_id: "c1", type: "cashback",
+  id: "cb1", customer_id: "c1",
   name: "Cashback", cashback_rate: 5, active: true,
 }
 
 const mockReward: Reward = {
-  id: "r1", customer_id: "c1", program_id: "p1",
+  id: "r1", customer_id: "c1", customer_sisfi_id: "p1",
   name: "Free Coffee", description: "A coffee", points_cost: 100, active: true,
 }
 
 const mockCashbackReward: CashbackReward = {
-  id: "cr1", customer_id: "c1", program_id: "cb1",
+  id: "cr1", customer_id: "c1", customer_sisfi_id: "cb1",
   name: "Discount", description: "10% off", cost: 50, active: true,
 }
 

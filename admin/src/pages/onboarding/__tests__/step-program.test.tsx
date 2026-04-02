@@ -31,7 +31,7 @@ describe("StepProgram", () => {
   it("renders title and description", () => {
     renderWithProviders(<StepProgram {...defaultProps} />)
     expect(screen.getByText("Elige tu programa de fidelidad")).toBeInTheDocument()
-    expect(screen.getByText(/Selecciona uno o ambos/)).toBeInTheDocument()
+    expect(screen.getByText(/Selecciona el tipo de programa/)).toBeInTheDocument()
   })
 
   it("renders both program type cards", () => {
@@ -54,7 +54,7 @@ describe("StepProgram", () => {
     // Both program configs have "Nombre del programa", use getAllByLabelText
     const nameInputs = screen.getAllByLabelText("Nombre del programa")
     expect(nameInputs.length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByLabelText("Puntos por compra")).toBeInTheDocument()
+    expect(screen.getByLabelText("1 punto por cada $")).toBeInTheDocument()
   })
 
   it("shows config fields when Cashback is selected", async () => {
@@ -74,7 +74,7 @@ describe("StepProgram", () => {
       <StepProgram
         {...defaultProps}
         earnBurnProgram={{
-          id: "p1", customer_id: "c1", type: "earn-burn",
+          id: "p1", customer_id: "c1",
           name: "Programa de puntos", points_ratio: 100, active: true,
         }}
       />
@@ -87,7 +87,7 @@ describe("StepProgram", () => {
       <StepProgram
         {...defaultProps}
         cashbackProgram={{
-          id: "cb1", customer_id: "c1", type: "cashback",
+          id: "cb1", customer_id: "c1",
           name: "Cashback", cashback_rate: 5, active: true,
         }}
       />
@@ -102,7 +102,7 @@ describe("StepProgram", () => {
       <StepProgram
         {...defaultProps}
         earnBurnProgram={{
-          id: "p1", customer_id: "c1", type: "earn-burn",
+          id: "p1", customer_id: "c1",
           name: "Mi Programa", points_ratio: 50, active: true,
         }}
       />

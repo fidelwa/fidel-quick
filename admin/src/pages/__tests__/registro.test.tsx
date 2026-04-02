@@ -20,8 +20,6 @@ describe("RegistroPage", () => {
     renderWithProviders(<RegistroPage />)
     expect(screen.getByText("Crea tu programa de fidelidad")).toBeInTheDocument()
     expect(screen.getByLabelText("Nombre del negocio")).toBeInTheDocument()
-    expect(screen.getByLabelText("Slug (URL)")).toBeInTheDocument()
-    expect(screen.getByLabelText("Telefono del negocio")).toBeInTheDocument()
     expect(screen.getByLabelText("Email del administrador")).toBeInTheDocument()
     expect(screen.getByLabelText("Password")).toBeInTheDocument()
     expect(screen.getByLabelText("Confirmar password")).toBeInTheDocument()
@@ -30,37 +28,6 @@ describe("RegistroPage", () => {
   it("renders description field as optional", () => {
     renderWithProviders(<RegistroPage />)
     expect(screen.getByLabelText("Descripcion (opcional)")).toBeInTheDocument()
-  })
-
-  it("auto-generates slug from name", async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<RegistroPage />)
-    await user.type(screen.getByLabelText("Nombre del negocio"), "Mi Restaurante")
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Slug (URL)")).toHaveValue("mi-restaurante")
-    })
-  })
-
-  it("auto-generates slug stripping accents and special chars", async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<RegistroPage />)
-    await user.type(screen.getByLabelText("Nombre del negocio"), "Café Señor!")
-
-    await waitFor(() => {
-      const slugValue = (screen.getByLabelText("Slug (URL)") as HTMLInputElement).value
-      expect(slugValue).toBe("cafe-senor")
-    })
-  })
-
-  it("shows URL preview when slug has 3+ chars", async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<RegistroPage />)
-    await user.type(screen.getByLabelText("Nombre del negocio"), "Test Place")
-
-    await waitFor(() => {
-      expect(screen.getByText(/fidel\.app\/unirse\//)).toBeInTheDocument()
-    })
   })
 
   it("renders login link", () => {
@@ -89,7 +56,7 @@ describe("RegistroPage", () => {
     renderWithProviders(<RegistroPage />)
 
     await user.type(screen.getByLabelText("Nombre del negocio"), "Test")
-    await user.type(screen.getByLabelText("Telefono del negocio"), "+5255123456789")
+    await user.type(screen.getByPlaceholderText("5512345678"), "5512345678")
     await user.type(screen.getByLabelText("Email del administrador"), "a@b.com")
     await user.type(screen.getByLabelText("Password"), "password1")
     await user.type(screen.getByLabelText("Confirmar password"), "password2")
@@ -100,24 +67,25 @@ describe("RegistroPage", () => {
     })
   })
 
-  it("shows slug format error for invalid chars", async () => {
+  it("shows password strength bar when typing", async () => {
     const user = userEvent.setup()
     renderWithProviders(<RegistroPage />)
 
-    // Manually edit slug to invalid value
-    const slugInput = screen.getByLabelText("Slug (URL)")
-    await user.clear(slugInput)
-    await user.type(slugInput, "INVALID SLUG!!")
-
-    await user.type(screen.getByLabelText("Nombre del negocio"), " ") // trigger to avoid required
-    await user.type(screen.getByLabelText("Telefono del negocio"), "+5255123456789")
-    await user.type(screen.getByLabelText("Email del administrador"), "a@b.com")
-    await user.type(screen.getByLabelText("Password"), "password1")
-    await user.type(screen.getByLabelText("Confirmar password"), "password1")
-    await user.click(screen.getByRole("button", { name: "Crear cuenta" }))
+    await user.type(screen.getByLabelText("Password"), "ab")
 
     await waitFor(() => {
-      expect(screen.getByText("Solo letras minusculas, numeros y guiones")).toBeInTheDocument()
+      expect(screen.getByText("Muy debil")).toBeInTheDocument()
+    })
+  })
+
+  it("shows strong password indicator", async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<RegistroPage />)
+
+    await user.type(screen.getByLabelText("Password"), "MyStr0ng!Pass")
+
+    await waitFor(() => {
+      expect(screen.getByText("Muy fuerte")).toBeInTheDocument()
     })
   })
 })

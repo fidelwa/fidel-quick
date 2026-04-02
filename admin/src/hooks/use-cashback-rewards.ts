@@ -13,8 +13,10 @@ export function useCashbackRewards(programId: string) {
 export function useCreateCashbackReward(programId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: { name: string; description: string; cost: number }) =>
-      createCashbackReward(programId, data),
+    mutationFn: async (data: { name: string; description: string; cost: number }) => {
+      const resp = await createCashbackReward(programId, data)
+      return { customer_sisfi_id: programId, active: true, ...data, ...resp } as CashbackReward
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cashback-rewards", programId] })
     },

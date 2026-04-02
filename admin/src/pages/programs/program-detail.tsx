@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, Link } from "react-router-dom"
 import { useForm } from "react-hook-form"
 import { z } from "zod/v4"
@@ -36,7 +36,8 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
-import { ArrowLeft, Plus } from "lucide-react"
+import { ArrowLeft, Plus, Upload, Loader2 } from "lucide-react"
+import * as XLSX from "xlsx"
 import { formatPoints } from "@/lib/utils"
 
 const programSchema = z.object({
@@ -63,6 +64,8 @@ export function ProgramDetailPage() {
   const createReward = useCreateReward(id!)
   const updateReward = useUpdateReward(id!)
   const [rewardDialogOpen, setRewardDialogOpen] = useState(false)
+  const [importingExcel, setImportingExcel] = useState(false)
+  const excelFileRef = useRef<HTMLInputElement>(null)
 
   const programForm = useForm<ProgramFormValues>({
     resolver: zodResolver(programSchema),
@@ -110,6 +113,42 @@ export function ProgramDetailPage() {
       onSuccess: () => toast.success(active ? "Recompensa activada" : "Recompensa desactivada"),
       onError: (err) => toast.error(err.message),
     })
+  }
+
+  const onImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ""
+
+    setImportingExcel(true)
+    try {
+      const data = new Uint8Array(await file.arrayBuffer())
+      const workbook = XLSX.read(data, { type: "array" })
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet)
+
+      let created = 0
+      for (const row of rows) {
+        const name = String(row.nombre ?? row.Nombre ?? "").trim()
+        const description = String(row.descripcion ?? row.Descripcion ?? "").trim()
+        const pointsCost = Number(row.puntos ?? row.Puntos ?? row.costo ?? row.Costo ?? 0)
+
+        if (!name || pointsCost <= 0) continue
+
+        await createReward.mutateAsync({ name, description, points_cost: pointsCost })
+        created++
+      }
+
+      if (created > 0) {
+        toast.success(`${created} recompensa${created > 1 ? "s" : ""} importada${created > 1 ? "s" : ""}`)
+      } else {
+        toast.error("No se encontraron filas validas. Columnas: Nombre, Descripcion, Puntos")
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error al importar")
+    } finally {
+      setImportingExcel(false)
+    }
   }
 
   if (loadingPrograms) {
@@ -165,7 +204,7 @@ export function ProgramDetailPage() {
                   name="points_ratio"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Ratio de puntos (por $1)</FormLabel>
+                      <FormLabel>1 punto por cada $</FormLabel>
                       <FormControl>
                         <Input type="number" min={1} {...field} onChange={(e) => field.onChange(Number(e.target.value))} />
                       </FormControl>
@@ -196,6 +235,26 @@ export function ProgramDetailPage() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold">Recompensas</h2>
+          <div className="flex gap-2">
+            <input
+              ref={excelFileRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+              onChange={onImportExcel}
+            />
+            <Button
+              variant="outline"
+              onClick={() => excelFileRef.current?.click()}
+              disabled={importingExcel}
+            >
+              {importingExcel ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="mr-2 h-4 w-4" />
+              )}
+              Importar Excel
+            </Button>
           <Dialog open={rewardDialogOpen} onOpenChange={setRewardDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline">
@@ -255,6 +314,7 @@ export function ProgramDetailPage() {
               </Form>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
 
         {loadingRewards ? (

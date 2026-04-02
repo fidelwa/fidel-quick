@@ -33,10 +33,10 @@ export function StepProgram({
   const [cashbackSelected, setCashbackSelected] = useState(!!cashbackProgram)
 
   const [earnName, setEarnName] = useState(earnBurnProgram?.name ?? "")
-  const [earnRatio, setEarnRatio] = useState(earnBurnProgram?.points_ratio ?? 100)
+  const [earnRatio, setEarnRatio] = useState(String(earnBurnProgram?.points_ratio ?? 15))
 
   const [cashbackName, setCashbackName] = useState(cashbackProgram?.name ?? "")
-  const [cashbackRate, setCashbackRate] = useState(cashbackProgram?.cashback_rate ?? 5)
+  const [cashbackRate, setCashbackRate] = useState(String(cashbackProgram?.cashback_rate ?? 5))
 
   const [saving, setSaving] = useState(false)
 
@@ -56,9 +56,8 @@ export function StepProgram({
         }
         const program = await createProgram.mutateAsync({
           customer_id: customerId,
-          type: "earn-burn",
           name: earnName.trim(),
-          points_ratio: earnRatio,
+          points_ratio: Number(earnRatio) || 15,
         })
         onEarnBurnCreated(program)
       }
@@ -72,7 +71,7 @@ export function StepProgram({
         const program = await createCashbackProgram.mutateAsync({
           customer_id: customerId,
           name: cashbackName.trim(),
-          cashback_rate: cashbackRate,
+          cashback_rate: Number(cashbackRate) || 5,
         })
         onCashbackCreated(program)
       }
@@ -97,7 +96,7 @@ export function StepProgram({
       <div>
         <h2 className="text-xl font-semibold">Elige tu programa de fidelidad</h2>
         <p className="text-sm text-muted-foreground">
-          Selecciona uno o ambos tipos de programa para tu negocio
+          Selecciona el tipo de programa para tu negocio
         </p>
       </div>
 
@@ -105,7 +104,11 @@ export function StepProgram({
         {/* Earn-Burn Card */}
         <button
           type="button"
-          onClick={() => !earnBurnProgram && setEarnSelected(!earnSelected)}
+          onClick={() => {
+            if (earnBurnProgram) return
+            setEarnSelected(!earnSelected)
+            if (!earnSelected) setCashbackSelected(false)
+          }}
           className={cn(
             "rounded-lg border-2 p-4 text-left transition-all duration-200",
             earnSelected || earnBurnProgram
@@ -130,7 +133,11 @@ export function StepProgram({
         {/* Cashback Card */}
         <button
           type="button"
-          onClick={() => !cashbackProgram && setCashbackSelected(!cashbackSelected)}
+          onClick={() => {
+            if (cashbackProgram) return
+            setCashbackSelected(!cashbackSelected)
+            if (!cashbackSelected) setEarnSelected(false)
+          }}
           className={cn(
             "rounded-lg border-2 p-4 text-left transition-all duration-200",
             cashbackSelected || cashbackProgram
@@ -175,17 +182,22 @@ export function StepProgram({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="earn-ratio">Puntos por compra</Label>
+                <Label htmlFor="earn-ratio">1 punto por cada $</Label>
                 <Input
                   id="earn-ratio"
                   type="number"
                   min={1}
                   value={earnRatio}
-                  onChange={(e) => setEarnRatio(Number(e.target.value))}
+                  onChange={(e) => setEarnRatio(e.target.value)}
                   disabled={!!earnBurnProgram}
                 />
               </div>
             </div>
+            {Number(earnRatio) > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Ejemplo: compra de $150 = <span className="font-semibold text-foreground">{Math.floor(150 / Number(earnRatio)).toLocaleString()} puntos</span>
+              </p>
+            )}
           </div>
         </div>
       </div>

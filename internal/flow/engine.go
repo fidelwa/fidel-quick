@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
@@ -175,18 +174,9 @@ func (e *Engine) processStep(ctx context.Context, user loyalty.UserContext, fs *
 
 // handleMenuSelection starts a new flow or executes a direct command.
 func (e *Engine) handleMenuSelection(ctx context.Context, user loyalty.UserContext, commandID string) error {
-	// Check for prefixed selections (e.g. "reward:{id}" from reward list)
-	if rewardID, ok := strings.CutPrefix(commandID, "reward:"); ok {
-		return e.startFlowWithData(ctx, user, "request_redemption", map[string]string{
-			"reward_id": rewardID,
-		})
-	}
-
-	// Check for benefit prefix (cashback module)
-	if benefitID, ok := strings.CutPrefix(commandID, "benefit:"); ok {
-		return e.startFlowWithData(ctx, user, "cb_request_redemption", map[string]string{
-			"reward_id": benefitID,
-		})
+	// Check for prefixed selections — delegated to modules via registry
+	if flowCmd, flowData := e.registry.ResolveSelection(commandID); flowCmd != "" {
+		return e.startFlowWithData(ctx, user, flowCmd, flowData)
 	}
 
 	// Check if this command has a flow
@@ -330,6 +320,21 @@ func (e *Engine) presentMainMenu(ctx context.Context, user loyalty.UserContext) 
 			ID:          m.ID,
 			Title:       m.Title,
 			Description: m.Description,
+		})
+	}
+
+	// Add role switch option if user has dual role
+	if user.CanSwitchRole {
+		label := "Usar como cliente"
+		desc := "Ver menu de cliente"
+		if user.Role == "client" {
+			label = "Modo colaborador"
+			desc = "Volver al menu de colaborador"
+		}
+		options = append(options, ListOption{
+			ID:          "cambiar_rol",
+			Title:       label,
+			Description: desc,
 		})
 	}
 

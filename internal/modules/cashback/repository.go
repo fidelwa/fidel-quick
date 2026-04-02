@@ -9,16 +9,16 @@ import (
 
 type Repository interface {
 	GetProgram(ctx context.Context, customerID string) (*CashbackProgram, error)
-	GetProgramByID(ctx context.Context, programID string) (*CashbackProgram, error)
-	GetBalance(ctx context.Context, clientID, programID string) (float64, error)
-	UpsertBalance(ctx context.Context, clientID, programID string, delta float64) (float64, error)
+	GetProgramByID(ctx context.Context, customerSisfiID string) (*CashbackProgram, error)
+	GetBalance(ctx context.Context, clientID, customerSisfiID string) (float64, error)
+	UpsertBalance(ctx context.Context, clientID, customerSisfiID string, delta float64) (float64, error)
 	CreateTransaction(ctx context.Context, tx *CashbackTransaction) error
 	GetTransaction(ctx context.Context, id string) (*CashbackTransaction, error)
-	ListTransactions(ctx context.Context, clientID, programID string, limit int) ([]CashbackTransaction, error)
+	ListTransactions(ctx context.Context, clientID, customerSisfiID string, limit int) ([]CashbackTransaction, error)
 	ListCorrectableTransactions(ctx context.Context, clientID string) ([]CashbackTransaction, error)
 	GetClientName(ctx context.Context, clientID string) (string, error)
 
-	ListRewards(ctx context.Context, customerID, programID string, maxCost float64) ([]CashbackReward, error)
+	ListRewards(ctx context.Context, customerID, customerSisfiID string, maxCost float64) ([]CashbackReward, error)
 	GetReward(ctx context.Context, id string) (*CashbackReward, error)
 	CreateReward(ctx context.Context, r *CashbackReward) error
 	UpdateReward(ctx context.Context, r *CashbackReward) error
@@ -32,17 +32,17 @@ type Repository interface {
 
 	// Admin CRUD
 	ListPrograms(ctx context.Context, customerID string) ([]CashbackProgram, error)
-	CreateProgram(ctx context.Context, p *CashbackProgram) error
-	UpdateProgram(ctx context.Context, p *CashbackProgram) error
-	ListAllRewards(ctx context.Context, programID string) ([]CashbackReward, error)
-	CreateRewardAdmin(ctx context.Context, programID string, r *CashbackReward) error
+	ListAllRewards(ctx context.Context, customerSisfiID string) ([]CashbackReward, error)
+	CreateRewardAdmin(ctx context.Context, customerSisfiID string, r *CashbackReward) error
 	UpdateRewardAdmin(ctx context.Context, r *CashbackReward) error
+
+	GetClientPhone(ctx context.Context, clientID string) (string, error)
 
 	// Transactional
 	AddCashbackTx(ctx context.Context, t *CashbackTransaction) (float64, error)
 	BurnCashbackTx(ctx context.Context, t *CashbackTransaction, rd *CashbackRedemption) error
 	AdjustCashbackTx(ctx context.Context, t *CashbackTransaction) (float64, error)
-	EnsureBalance(ctx context.Context, clientID, programID string) error
+	EnsureBalance(ctx context.Context, clientID, customerSisfiID string) error
 	WithTx(ctx context.Context, fn func(tx *sql.Tx) error) error
 }
 
@@ -58,32 +58,36 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 func (r *PostgresRepository) GetProgram(ctx context.Context, customerID string) (*CashbackProgram, error) {
 	var p CashbackProgram
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, customer_id, type, name, cashback_rate, active
-		 FROM cashback_programs WHERE customer_id = $1 AND type = 'cashback' AND active = true`, customerID,
-	).Scan(&p.ID, &p.CustomerID, &p.Type, &p.Name, &p.CashbackRate, &p.Active)
+		`SELECT cs.id, cs.customer_id, cs.name, cc.cashback_rate, cs.active
+		 FROM customer_sisfi cs
+		 JOIN config_cashback cc ON cc.customer_sisfi_id = cs.id
+		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'cashback' AND cs.active = true`, customerID,
+	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.CashbackRate, &p.Active)
 	if err != nil {
 		return nil, fmt.Errorf("get cashback program: %w", err)
 	}
 	return &p, nil
 }
 
-func (r *PostgresRepository) GetProgramByID(ctx context.Context, programID string) (*CashbackProgram, error) {
+func (r *PostgresRepository) GetProgramByID(ctx context.Context, customerSisfiID string) (*CashbackProgram, error) {
 	var p CashbackProgram
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, customer_id, type, name, cashback_rate, active
-		 FROM cashback_programs WHERE id = $1`, programID,
-	).Scan(&p.ID, &p.CustomerID, &p.Type, &p.Name, &p.CashbackRate, &p.Active)
+		`SELECT cs.id, cs.customer_id, cs.name, cc.cashback_rate, cs.active
+		 FROM customer_sisfi cs
+		 JOIN config_cashback cc ON cc.customer_sisfi_id = cs.id
+		 WHERE cs.id = $1`, customerSisfiID,
+	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.CashbackRate, &p.Active)
 	if err != nil {
 		return nil, fmt.Errorf("get cashback program by id: %w", err)
 	}
 	return &p, nil
 }
 
-func (r *PostgresRepository) GetBalance(ctx context.Context, clientID, programID string) (float64, error) {
+func (r *PostgresRepository) GetBalance(ctx context.Context, clientID, customerSisfiID string) (float64, error) {
 	var balance float64
 	err := r.db.QueryRowContext(ctx,
-		`SELECT balance FROM cashback_balances WHERE client_id = $1 AND program_id = $2`,
-		clientID, programID,
+		`SELECT balance FROM balances_cashback WHERE client_id = $1 AND customer_sisfi_id = $2`,
+		clientID, customerSisfiID,
 	).Scan(&balance)
 	if err == sql.ErrNoRows {
 		return 0, nil
@@ -94,15 +98,15 @@ func (r *PostgresRepository) GetBalance(ctx context.Context, clientID, programID
 	return balance, nil
 }
 
-func (r *PostgresRepository) UpsertBalance(ctx context.Context, clientID, programID string, delta float64) (float64, error) {
+func (r *PostgresRepository) UpsertBalance(ctx context.Context, clientID, customerSisfiID string, delta float64) (float64, error) {
 	var newBalance float64
 	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO cashback_balances (client_id, program_id, balance)
+		INSERT INTO balances_cashback (client_id, customer_sisfi_id, balance)
 		VALUES ($1, $2, GREATEST(0, $3::NUMERIC))
-		ON CONFLICT (client_id, program_id) DO UPDATE
-		SET balance = GREATEST(0, cashback_balances.balance + $3::NUMERIC), updated_at = NOW()
+		ON CONFLICT (client_id, customer_sisfi_id) DO UPDATE
+		SET balance = GREATEST(0, balances_cashback.balance + $3::NUMERIC), updated_at = NOW()
 		RETURNING balance
-	`, clientID, programID, delta).Scan(&newBalance)
+	`, clientID, customerSisfiID, delta).Scan(&newBalance)
 	if err != nil {
 		return 0, fmt.Errorf("upsert cashback balance: %w", err)
 	}
@@ -111,10 +115,10 @@ func (r *PostgresRepository) UpsertBalance(ctx context.Context, clientID, progra
 
 func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *CashbackTransaction) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO cashback_transactions
-		(id, client_id, program_id, collaborator_id, type, amount, purchase_amount, balance_after, invoice_url, description, manual_entry, correction_reason, correction_evidence_url, correctable_until)
+		INSERT INTO transactions_cashback
+		(id, client_id, customer_sisfi_id, collaborator_id, type, amount, purchase_amount, balance_after, invoice_url, description, manual_entry, correction_reason, correction_evidence_url, correctable_until)
 		VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6::NUMERIC, $7::NUMERIC, $8::NUMERIC, NULLIF($9, ''), NULLIF($10, ''), $11, NULLIF($12, ''), NULLIF($13, ''), $14)
-	`, tx.ID, tx.ClientID, tx.ProgramID, tx.CollaboratorID, tx.Type, tx.Amount, tx.PurchaseAmount, tx.BalanceAfter,
+	`, tx.ID, tx.ClientID, tx.CustomerSisfiID, tx.CollaboratorID, tx.Type, tx.Amount, tx.PurchaseAmount, tx.BalanceAfter,
 		tx.InvoiceURL, tx.Description, tx.ManualEntry, tx.CorrectionReason, tx.CorrectionEvidenceURL, tx.CorrectableUntil)
 	if err != nil {
 		return fmt.Errorf("create cashback transaction: %w", err)
@@ -128,11 +132,11 @@ func (r *PostgresRepository) GetTransaction(ctx context.Context, id string) (*Ca
 	var purchaseAmount sql.NullFloat64
 	var correctableUntil sql.NullTime
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, client_id, program_id, collaborator_id, type, amount, purchase_amount, balance_after,
+		SELECT id, client_id, customer_sisfi_id, collaborator_id, type, amount, purchase_amount, balance_after,
 		       invoice_url, description, manual_entry, correction_reason, correction_evidence_url,
 		       correctable_until, created_at
-		FROM cashback_transactions WHERE id = $1
-	`, id).Scan(&tx.ID, &tx.ClientID, &tx.ProgramID, &collabID, &tx.Type, &tx.Amount, &purchaseAmount, &tx.BalanceAfter,
+		FROM transactions_cashback WHERE id = $1
+	`, id).Scan(&tx.ID, &tx.ClientID, &tx.CustomerSisfiID, &collabID, &tx.Type, &tx.Amount, &purchaseAmount, &tx.BalanceAfter,
 		&invoiceURL, &desc, &tx.ManualEntry, &corrReason, &corrEvidence, &correctableUntil, &tx.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get cashback transaction: %w", err)
@@ -151,13 +155,13 @@ func (r *PostgresRepository) GetTransaction(ctx context.Context, id string) (*Ca
 	return &tx, nil
 }
 
-func (r *PostgresRepository) ListTransactions(ctx context.Context, clientID, programID string, limit int) ([]CashbackTransaction, error) {
+func (r *PostgresRepository) ListTransactions(ctx context.Context, clientID, customerSisfiID string, limit int) ([]CashbackTransaction, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, type, amount, balance_after, description, created_at
-		FROM cashback_transactions
-		WHERE client_id = $1 AND program_id = $2
+		FROM transactions_cashback
+		WHERE client_id = $1 AND customer_sisfi_id = $2
 		ORDER BY created_at DESC LIMIT $3
-	`, clientID, programID, limit)
+	`, clientID, customerSisfiID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list cashback transactions: %w", err)
 	}
@@ -179,7 +183,7 @@ func (r *PostgresRepository) ListTransactions(ctx context.Context, clientID, pro
 func (r *PostgresRepository) ListCorrectableTransactions(ctx context.Context, clientID string) ([]CashbackTransaction, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, type, amount, purchase_amount, balance_after, created_at, correctable_until
-		FROM cashback_transactions
+		FROM transactions_cashback
 		WHERE client_id = $1 AND correctable_until > NOW() AND type = 'earn'
 		ORDER BY created_at DESC
 	`, clientID)
@@ -218,13 +222,24 @@ func (r *PostgresRepository) GetClientName(ctx context.Context, clientID string)
 	return name.String, nil
 }
 
-func (r *PostgresRepository) ListRewards(ctx context.Context, customerID, programID string, maxCost float64) ([]CashbackReward, error) {
+func (r *PostgresRepository) GetClientPhone(ctx context.Context, clientID string) (string, error) {
+	var phone string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT phone FROM clients WHERE id = $1`, clientID,
+	).Scan(&phone)
+	if err != nil {
+		return "", fmt.Errorf("get client phone: %w", err)
+	}
+	return phone, nil
+}
+
+func (r *PostgresRepository) ListRewards(ctx context.Context, customerID, customerSisfiID string, maxCost float64) ([]CashbackReward, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, customer_id, program_id, name, COALESCE(description, ''), cost, active
-		FROM cashback_rewards
-		WHERE customer_id = $1 AND program_id = $2 AND active = true AND cost <= $3::NUMERIC
+		SELECT id, customer_id, customer_sisfi_id, name, COALESCE(description, ''), cost, active
+		FROM rewards_cashback
+		WHERE customer_id = $1 AND customer_sisfi_id = $2 AND active = true AND cost <= $3::NUMERIC
 		ORDER BY cost ASC
-	`, customerID, programID, maxCost)
+	`, customerID, customerSisfiID, maxCost)
 	if err != nil {
 		return nil, fmt.Errorf("list cashback rewards: %w", err)
 	}
@@ -233,7 +248,7 @@ func (r *PostgresRepository) ListRewards(ctx context.Context, customerID, progra
 	var rewards []CashbackReward
 	for rows.Next() {
 		var rw CashbackReward
-		if err := rows.Scan(&rw.ID, &rw.CustomerID, &rw.ProgramID, &rw.Name, &rw.Description, &rw.Cost, &rw.Active); err != nil {
+		if err := rows.Scan(&rw.ID, &rw.CustomerID, &rw.CustomerSisfiID, &rw.Name, &rw.Description, &rw.Cost, &rw.Active); err != nil {
 			return nil, fmt.Errorf("scan cashback reward: %w", err)
 		}
 		rewards = append(rewards, rw)
@@ -245,8 +260,8 @@ func (r *PostgresRepository) GetReward(ctx context.Context, id string) (*Cashbac
 	var rw CashbackReward
 	var desc sql.NullString
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, customer_id, program_id, name, description, cost, active FROM cashback_rewards WHERE id = $1`, id,
-	).Scan(&rw.ID, &rw.CustomerID, &rw.ProgramID, &rw.Name, &desc, &rw.Cost, &rw.Active)
+		`SELECT id, customer_id, customer_sisfi_id, name, description, cost, active FROM rewards_cashback WHERE id = $1`, id,
+	).Scan(&rw.ID, &rw.CustomerID, &rw.CustomerSisfiID, &rw.Name, &desc, &rw.Cost, &rw.Active)
 	if err != nil {
 		return nil, fmt.Errorf("get cashback reward: %w", err)
 	}
@@ -256,15 +271,15 @@ func (r *PostgresRepository) GetReward(ctx context.Context, id string) (*Cashbac
 
 func (r *PostgresRepository) CreateReward(ctx context.Context, rw *CashbackReward) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO cashback_rewards (id, customer_id, program_id, name, description, cost, active)
+		INSERT INTO rewards_cashback (id, customer_id, customer_sisfi_id, name, description, cost, active)
 		VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6::NUMERIC, $7)
-	`, rw.ID, rw.CustomerID, rw.ProgramID, rw.Name, rw.Description, rw.Cost, rw.Active)
+	`, rw.ID, rw.CustomerID, rw.CustomerSisfiID, rw.Name, rw.Description, rw.Cost, rw.Active)
 	return err
 }
 
 func (r *PostgresRepository) UpdateReward(ctx context.Context, rw *CashbackReward) error {
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE cashback_rewards SET name = $2, description = NULLIF($3, ''), cost = $4::NUMERIC, active = $5, updated_at = NOW()
+		UPDATE rewards_cashback SET name = $2, description = NULLIF($3, ''), cost = $4::NUMERIC, active = $5, updated_at = NOW()
 		WHERE id = $1
 	`, rw.ID, rw.Name, rw.Description, rw.Cost, rw.Active)
 	return err
@@ -272,9 +287,9 @@ func (r *PostgresRepository) UpdateReward(ctx context.Context, rw *CashbackRewar
 
 func (r *PostgresRepository) CreateRedemption(ctx context.Context, rd *CashbackRedemption) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO cashback_redemptions (id, client_id, reward_id, program_id, code, status, amount_spent, expires_at)
+		INSERT INTO redemptions_cashback (id, client_id, reward_id, customer_sisfi_id, code, status, amount_spent, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7::NUMERIC, $8)
-	`, rd.ID, rd.ClientID, rd.RewardID, rd.ProgramID, rd.Code, rd.Status, rd.AmountSpent, rd.ExpiresAt)
+	`, rd.ID, rd.ClientID, rd.RewardID, rd.CustomerSisfiID, rd.Code, rd.Status, rd.AmountSpent, rd.ExpiresAt)
 	return err
 }
 
@@ -283,9 +298,9 @@ func (r *PostgresRepository) GetRedemptionByCode(ctx context.Context, code strin
 	var confirmedBy sql.NullString
 	var confirmedAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, client_id, reward_id, program_id, code, status, amount_spent, confirmed_by, expires_at, confirmed_at, created_at
-		FROM cashback_redemptions WHERE code = $1
-	`, code).Scan(&rd.ID, &rd.ClientID, &rd.RewardID, &rd.ProgramID, &rd.Code, &rd.Status,
+		SELECT id, client_id, reward_id, customer_sisfi_id, code, status, amount_spent, confirmed_by, expires_at, confirmed_at, created_at
+		FROM redemptions_cashback WHERE code = $1
+	`, code).Scan(&rd.ID, &rd.ClientID, &rd.RewardID, &rd.CustomerSisfiID, &rd.Code, &rd.Status,
 		&rd.AmountSpent, &confirmedBy, &rd.ExpiresAt, &confirmedAt, &rd.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get cashback redemption by code: %w", err)
@@ -299,7 +314,7 @@ func (r *PostgresRepository) GetRedemptionByCode(ctx context.Context, code strin
 
 func (r *PostgresRepository) ConfirmRedemption(ctx context.Context, id, collaboratorID string) error {
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE cashback_redemptions SET status = 'confirmed', confirmed_by = $2, confirmed_at = NOW()
+		UPDATE redemptions_cashback SET status = 'confirmed', confirmed_by = $2, confirmed_at = NOW()
 		WHERE id = $1 AND status = 'pending'
 	`, id, collaboratorID)
 	return err
@@ -307,7 +322,7 @@ func (r *PostgresRepository) ConfirmRedemption(ctx context.Context, id, collabor
 
 func (r *PostgresRepository) ExpirePendingRedemptions(ctx context.Context) (int, error) {
 	res, err := r.db.ExecContext(ctx, `
-		UPDATE cashback_redemptions SET status = 'expired'
+		UPDATE redemptions_cashback SET status = 'expired'
 		WHERE status = 'pending' AND expires_at < NOW()
 	`)
 	if err != nil {
@@ -324,12 +339,12 @@ func (r *PostgresRepository) CreateFeedback(ctx context.Context, clientID, custo
 	return err
 }
 
-func (r *PostgresRepository) EnsureBalance(ctx context.Context, clientID, programID string) error {
+func (r *PostgresRepository) EnsureBalance(ctx context.Context, clientID, customerSisfiID string) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO cashback_balances (client_id, program_id, balance)
+		INSERT INTO balances_cashback (client_id, customer_sisfi_id, balance)
 		VALUES ($1, $2, 0)
-		ON CONFLICT (client_id, program_id) DO NOTHING
-	`, clientID, programID)
+		ON CONFLICT (client_id, customer_sisfi_id) DO NOTHING
+	`, clientID, customerSisfiID)
 	return err
 }
 
@@ -350,12 +365,12 @@ func (r *PostgresRepository) AddCashbackTx(ctx context.Context, t *CashbackTrans
 	var newBalance float64
 	err := r.WithTx(ctx, func(tx *sql.Tx) error {
 		err := tx.QueryRowContext(ctx, `
-			INSERT INTO cashback_balances (client_id, program_id, balance)
+			INSERT INTO balances_cashback (client_id, customer_sisfi_id, balance)
 			VALUES ($1, $2, GREATEST(0, $3::NUMERIC))
-			ON CONFLICT (client_id, program_id) DO UPDATE
-			SET balance = GREATEST(0, cashback_balances.balance + $3::NUMERIC), updated_at = NOW()
+			ON CONFLICT (client_id, customer_sisfi_id) DO UPDATE
+			SET balance = GREATEST(0, balances_cashback.balance + $3::NUMERIC), updated_at = NOW()
 			RETURNING balance
-		`, t.ClientID, t.ProgramID, t.Amount).Scan(&newBalance)
+		`, t.ClientID, t.CustomerSisfiID, t.Amount).Scan(&newBalance)
 		if err != nil {
 			return fmt.Errorf("upsert cashback balance: %w", err)
 		}
@@ -363,10 +378,10 @@ func (r *PostgresRepository) AddCashbackTx(ctx context.Context, t *CashbackTrans
 		t.BalanceAfter = newBalance
 
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO cashback_transactions
-			(id, client_id, program_id, collaborator_id, type, amount, purchase_amount, balance_after, invoice_url, description, manual_entry, correctable_until)
+			INSERT INTO transactions_cashback
+			(id, client_id, customer_sisfi_id, collaborator_id, type, amount, purchase_amount, balance_after, invoice_url, description, manual_entry, correctable_until)
 			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6::NUMERIC, $7::NUMERIC, $8::NUMERIC, NULLIF($9, ''), NULLIF($10, ''), $11, $12)
-		`, t.ID, t.ClientID, t.ProgramID, t.CollaboratorID, t.Type, t.Amount, t.PurchaseAmount, t.BalanceAfter,
+		`, t.ID, t.ClientID, t.CustomerSisfiID, t.CollaboratorID, t.Type, t.Amount, t.PurchaseAmount, t.BalanceAfter,
 			t.InvoiceURL, t.Description, t.ManualEntry, t.CorrectableUntil)
 		return err
 	})
@@ -378,11 +393,11 @@ func (r *PostgresRepository) BurnCashbackTx(ctx context.Context, t *CashbackTran
 	return r.WithTx(ctx, func(tx *sql.Tx) error {
 		var newBalance float64
 		err := tx.QueryRowContext(ctx, `
-			UPDATE cashback_balances
+			UPDATE balances_cashback
 			SET balance = balance + $3::NUMERIC, updated_at = NOW()
-			WHERE client_id = $1 AND program_id = $2 AND balance >= $4::NUMERIC
+			WHERE client_id = $1 AND customer_sisfi_id = $2 AND balance >= $4::NUMERIC
 			RETURNING balance
-		`, t.ClientID, t.ProgramID, t.Amount, -t.Amount).Scan(&newBalance)
+		`, t.ClientID, t.CustomerSisfiID, t.Amount, -t.Amount).Scan(&newBalance)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("saldo insuficiente")
@@ -393,17 +408,17 @@ func (r *PostgresRepository) BurnCashbackTx(ctx context.Context, t *CashbackTran
 		t.BalanceAfter = newBalance
 
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO cashback_transactions (id, client_id, program_id, type, amount, balance_after, description)
+			INSERT INTO transactions_cashback (id, client_id, customer_sisfi_id, type, amount, balance_after, description)
 			VALUES ($1, $2, $3, $4, $5::NUMERIC, $6::NUMERIC, $7)
-		`, t.ID, t.ClientID, t.ProgramID, t.Type, t.Amount, t.BalanceAfter, t.Description)
+		`, t.ID, t.ClientID, t.CustomerSisfiID, t.Type, t.Amount, t.BalanceAfter, t.Description)
 		if err != nil {
 			return fmt.Errorf("create burn cashback tx: %w", err)
 		}
 
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO cashback_redemptions (id, client_id, reward_id, program_id, code, status, amount_spent, expires_at)
+			INSERT INTO redemptions_cashback (id, client_id, reward_id, customer_sisfi_id, code, status, amount_spent, expires_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7::NUMERIC, $8)
-		`, rd.ID, rd.ClientID, rd.RewardID, rd.ProgramID, rd.Code, rd.Status, rd.AmountSpent, rd.ExpiresAt)
+		`, rd.ID, rd.ClientID, rd.RewardID, rd.CustomerSisfiID, rd.Code, rd.Status, rd.AmountSpent, rd.ExpiresAt)
 		return err
 	})
 }
@@ -414,7 +429,7 @@ func (r *PostgresRepository) AdjustCashbackTx(ctx context.Context, t *CashbackTr
 	err := r.WithTx(ctx, func(tx *sql.Tx) error {
 		var correctableUntil time.Time
 		err := tx.QueryRowContext(ctx,
-			`SELECT correctable_until FROM cashback_transactions WHERE id = $1 AND correctable_until > NOW()`,
+			`SELECT correctable_until FROM transactions_cashback WHERE id = $1 AND correctable_until > NOW()`,
 			t.Description, // description stores the original tx ID for adjustments
 		).Scan(&correctableUntil)
 		if err != nil {
@@ -422,11 +437,11 @@ func (r *PostgresRepository) AdjustCashbackTx(ctx context.Context, t *CashbackTr
 		}
 
 		err = tx.QueryRowContext(ctx, `
-			UPDATE cashback_balances
+			UPDATE balances_cashback
 			SET balance = GREATEST(0, balance + $3::NUMERIC), updated_at = NOW()
-			WHERE client_id = $1 AND program_id = $2
+			WHERE client_id = $1 AND customer_sisfi_id = $2
 			RETURNING balance
-		`, t.ClientID, t.ProgramID, t.Amount).Scan(&newBalance)
+		`, t.ClientID, t.CustomerSisfiID, t.Amount).Scan(&newBalance)
 		if err != nil {
 			return fmt.Errorf("adjust cashback balance: %w", err)
 		}
@@ -434,10 +449,10 @@ func (r *PostgresRepository) AdjustCashbackTx(ctx context.Context, t *CashbackTr
 		t.BalanceAfter = newBalance
 
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO cashback_transactions
-			(id, client_id, program_id, collaborator_id, type, amount, balance_after, correction_reason, correction_evidence_url)
+			INSERT INTO transactions_cashback
+			(id, client_id, customer_sisfi_id, collaborator_id, type, amount, balance_after, correction_reason, correction_evidence_url)
 			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6::NUMERIC, $7::NUMERIC, NULLIF($8, ''), NULLIF($9, ''))
-		`, t.ID, t.ClientID, t.ProgramID, t.CollaboratorID, t.Type, t.Amount, t.BalanceAfter,
+		`, t.ID, t.ClientID, t.CustomerSisfiID, t.CollaboratorID, t.Type, t.Amount, t.BalanceAfter,
 			t.CorrectionReason, t.CorrectionEvidenceURL)
 		return err
 	})
@@ -448,7 +463,11 @@ func (r *PostgresRepository) AdjustCashbackTx(ctx context.Context, t *CashbackTr
 
 func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string) ([]CashbackProgram, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, customer_id, type, name, cashback_rate, active FROM cashback_programs WHERE customer_id = $1 ORDER BY created_at`,
+		`SELECT cs.id, cs.customer_id, cs.name, cc.cashback_rate, cs.active
+		 FROM customer_sisfi cs
+		 JOIN config_cashback cc ON cc.customer_sisfi_id = cs.id
+		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'cashback'
+		 ORDER BY cs.created_at`,
 		customerID)
 	if err != nil {
 		return nil, fmt.Errorf("list cashback programs: %w", err)
@@ -458,7 +477,7 @@ func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string
 	var programs []CashbackProgram
 	for rows.Next() {
 		var p CashbackProgram
-		if err := rows.Scan(&p.ID, &p.CustomerID, &p.Type, &p.Name, &p.CashbackRate, &p.Active); err != nil {
+		if err := rows.Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.CashbackRate, &p.Active); err != nil {
 			return nil, fmt.Errorf("scan cashback program: %w", err)
 		}
 		programs = append(programs, p)
@@ -466,30 +485,10 @@ func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string
 	return programs, nil
 }
 
-func (r *PostgresRepository) CreateProgram(ctx context.Context, p *CashbackProgram) error {
-	if p.CashbackRate <= 0 {
-		p.CashbackRate = 0.05
-	}
-	return r.db.QueryRowContext(ctx,
-		`INSERT INTO cashback_programs (customer_id, type, name, cashback_rate) VALUES ($1, $2, $3, $4::NUMERIC) RETURNING id`,
-		p.CustomerID, p.Type, p.Name, p.CashbackRate,
-	).Scan(&p.ID)
-}
-
-func (r *PostgresRepository) UpdateProgram(ctx context.Context, p *CashbackProgram) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE cashback_programs SET name = COALESCE(NULLIF($2, ''), name),
-		 cashback_rate = CASE WHEN $3::NUMERIC > 0 THEN $3::NUMERIC ELSE cashback_rate END,
-		 active = COALESCE($4, active), updated_at = NOW() WHERE id = $1`,
-		p.ID, p.Name, p.CashbackRate, p.Active,
-	)
-	return err
-}
-
-func (r *PostgresRepository) ListAllRewards(ctx context.Context, programID string) ([]CashbackReward, error) {
+func (r *PostgresRepository) ListAllRewards(ctx context.Context, customerSisfiID string) ([]CashbackReward, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, customer_id, program_id, name, COALESCE(description, ''), cost, active FROM cashback_rewards
-		 WHERE program_id = $1 ORDER BY cost`, programID)
+		`SELECT id, customer_id, customer_sisfi_id, name, COALESCE(description, ''), cost, active FROM rewards_cashback
+		 WHERE customer_sisfi_id = $1 ORDER BY cost`, customerSisfiID)
 	if err != nil {
 		return nil, fmt.Errorf("list all cashback rewards: %w", err)
 	}
@@ -498,7 +497,7 @@ func (r *PostgresRepository) ListAllRewards(ctx context.Context, programID strin
 	var rewards []CashbackReward
 	for rows.Next() {
 		var rw CashbackReward
-		if err := rows.Scan(&rw.ID, &rw.CustomerID, &rw.ProgramID, &rw.Name, &rw.Description, &rw.Cost, &rw.Active); err != nil {
+		if err := rows.Scan(&rw.ID, &rw.CustomerID, &rw.CustomerSisfiID, &rw.Name, &rw.Description, &rw.Cost, &rw.Active); err != nil {
 			return nil, fmt.Errorf("scan cashback reward: %w", err)
 		}
 		rewards = append(rewards, rw)
@@ -506,25 +505,25 @@ func (r *PostgresRepository) ListAllRewards(ctx context.Context, programID strin
 	return rewards, nil
 }
 
-func (r *PostgresRepository) CreateRewardAdmin(ctx context.Context, programID string, rw *CashbackReward) error {
+func (r *PostgresRepository) CreateRewardAdmin(ctx context.Context, customerSisfiID string, rw *CashbackReward) error {
 	var customerID string
 	err := r.db.QueryRowContext(ctx,
-		`SELECT customer_id FROM cashback_programs WHERE id = $1`, programID,
+		`SELECT customer_id FROM customer_sisfi WHERE id = $1`, customerSisfiID,
 	).Scan(&customerID)
 	if err != nil {
-		return fmt.Errorf("get program for reward: %w", err)
+		return fmt.Errorf("get customer_sisfi for reward: %w", err)
 	}
 
 	return r.db.QueryRowContext(ctx,
-		`INSERT INTO cashback_rewards (customer_id, program_id, name, description, cost)
+		`INSERT INTO rewards_cashback (customer_id, customer_sisfi_id, name, description, cost)
 		 VALUES ($1, $2, $3, NULLIF($4, ''), $5::NUMERIC) RETURNING id`,
-		customerID, programID, rw.Name, rw.Description, rw.Cost,
+		customerID, customerSisfiID, rw.Name, rw.Description, rw.Cost,
 	).Scan(&rw.ID)
 }
 
 func (r *PostgresRepository) UpdateRewardAdmin(ctx context.Context, rw *CashbackReward) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE cashback_rewards SET name = COALESCE(NULLIF($2, ''), name),
+		`UPDATE rewards_cashback SET name = COALESCE(NULLIF($2, ''), name),
 		 description = COALESCE(NULLIF($3, ''), description),
 		 cost = CASE WHEN $4::NUMERIC > 0 THEN $4::NUMERIC ELSE cost END,
 		 active = COALESCE($5, active), updated_at = NOW() WHERE id = $1`,

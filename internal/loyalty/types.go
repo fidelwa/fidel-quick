@@ -8,6 +8,7 @@ type UserContext struct {
 	UserID        string // client_id or collaborator_id
 	Phone         string
 	ActiveModules []string // e.g. ["earn_burn", "cashback"]
+	CanSwitchRole bool     // true if user can toggle collaborator/client
 }
 
 // Command represents a menu selection or flow execution request.

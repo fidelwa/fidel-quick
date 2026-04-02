@@ -29,22 +29,22 @@ afterEach(() => {
 })
 
 const earnBurnProgram: Program = {
-  id: "p1", customer_id: "c1", type: "earn-burn",
+  id: "p1", customer_id: "c1",
   name: "Puntos", points_ratio: 100, active: true,
 }
 
 const cashbackProgram: CashbackProgram = {
-  id: "cb1", customer_id: "c1", type: "cashback",
+  id: "cb1", customer_id: "c1",
   name: "Cashback 5%", cashback_rate: 5, active: true,
 }
 
 const rewards: Reward[] = [
-  { id: "r1", customer_id: "c1", program_id: "p1", name: "Cafe", description: "", points_cost: 100, active: true },
-  { id: "r2", customer_id: "c1", program_id: "p1", name: "Postre", description: "", points_cost: 200, active: true },
+  { id: "r1", customer_id: "c1", customer_sisfi_id: "p1", name: "Cafe", description: "", points_cost: 100, active: true },
+  { id: "r2", customer_id: "c1", customer_sisfi_id: "p1", name: "Postre", description: "", points_cost: 200, active: true },
 ]
 
 const cashbackRewards: CashbackReward[] = [
-  { id: "cr1", customer_id: "c1", program_id: "cb1", name: "Descuento", description: "", cost: 50, active: true },
+  { id: "cr1", customer_id: "c1", customer_sisfi_id: "cb1", name: "Descuento", description: "", cost: 50, active: true },
 ]
 
 const collaborators: Collaborator[] = [

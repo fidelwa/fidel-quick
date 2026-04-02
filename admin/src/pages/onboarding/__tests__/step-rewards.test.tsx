@@ -20,22 +20,22 @@ afterEach(() => {
 })
 
 const earnBurnProgram: Program = {
-  id: "p1", customer_id: "c1", type: "earn-burn",
+  id: "p1", customer_id: "c1",
   name: "Puntos", points_ratio: 100, active: true,
 }
 
 const cashbackProgram: CashbackProgram = {
-  id: "cb1", customer_id: "c1", type: "cashback",
+  id: "cb1", customer_id: "c1",
   name: "Cashback", cashback_rate: 5, active: true,
 }
 
 const mockReward: Reward = {
-  id: "r1", customer_id: "c1", program_id: "p1",
+  id: "r1", customer_id: "c1", customer_sisfi_id: "p1",
   name: "Cafe gratis", description: "Un cafe", points_cost: 100, active: true,
 }
 
 const mockCbReward: CashbackReward = {
-  id: "cr1", customer_id: "c1", program_id: "cb1",
+  id: "cr1", customer_id: "c1", customer_sisfi_id: "cb1",
   name: "Descuento", description: "10% off", cost: 50, active: true,
 }
 
@@ -75,27 +75,26 @@ describe("StepRewards", () => {
 
   it("shows empty state for earn-burn when no rewards", () => {
     renderWithProviders(<StepRewards {...defaultProps} />)
-    expect(screen.getByText("Agrega tu primera recompensa de puntos")).toBeInTheDocument()
+    expect(screen.getByText("Agrega tu primera recompensa")).toBeInTheDocument()
   })
 
   it("shows empty state for cashback when no rewards", () => {
     renderWithProviders(
       <StepRewards {...defaultProps} cashbackProgram={cashbackProgram} />
     )
-    expect(screen.getByText("Agrega tu primer beneficio de cashback")).toBeInTheDocument()
+    expect(screen.getByText("Agrega tu primer beneficio")).toBeInTheDocument()
   })
 
-  it("displays existing rewards with Creado badge", () => {
+  it("displays existing rewards in table format", () => {
     renderWithProviders(
       <StepRewards {...defaultProps} rewards={[mockReward]} />
     )
     expect(screen.getByText("Cafe gratis")).toBeInTheDocument()
     expect(screen.getByText("Un cafe")).toBeInTheDocument()
-    expect(screen.getByText("100 pts")).toBeInTheDocument()
-    expect(screen.getByText("Creado")).toBeInTheDocument()
+    expect(screen.getByText("100")).toBeInTheDocument()
   })
 
-  it("displays existing cashback rewards with Creado badge", () => {
+  it("displays existing cashback rewards in table format", () => {
     renderWithProviders(
       <StepRewards
         {...defaultProps}
@@ -113,10 +112,10 @@ describe("StepRewards", () => {
     expect(screen.getByRole("button", { name: "Siguiente" })).toBeInTheDocument()
   })
 
-  it("renders inline form fields for earn-burn rewards", () => {
+  it("shows table headers for earn-burn", () => {
     renderWithProviders(<StepRewards {...defaultProps} />)
-    const nameLabels = screen.getAllByText("Nombre")
-    expect(nameLabels.length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText("Nombre")).toBeInTheDocument()
+    expect(screen.getByText("Puntos")).toBeInTheDocument()
   })
 
   it("shows both sections with both programs", () => {

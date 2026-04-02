@@ -18,6 +18,13 @@ type Module interface {
 	// Menus returns interactive WhatsApp menu definitions per role.
 	Menus() map[string][]MenuDefinition // role → menu options
 
+	// Prefixes returns selection ID prefixes this module handles (e.g., ["reward:"]).
+	Prefixes() []string
+
+	// SelectionFlow returns the flow command ID and data key for a given prefix.
+	// e.g., ("reward:", ) → ("request_redemption", "reward_id")
+	SelectionFlow(prefix string) (commandID string, dataKey string)
+
 	// HandleCommand processes a menu selection or completed flow.
 	HandleCommand(ctx context.Context, cmd Command) (*CommandResult, error)
 

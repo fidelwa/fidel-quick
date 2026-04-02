@@ -31,9 +31,9 @@ func setupAPIRouter(repo *mockRepo) *gin.Engine {
 
 func TestListPrograms_API(t *testing.T) {
 	repo := &mockRepo{
-		listProgramsFn: func(_ context.Context, customerID string) ([]Program, error) {
-			return []Program{
-				{ID: "p-1", CustomerID: customerID, Type: "earn_burn", Name: "Points"},
+		listProgramsFn: func(_ context.Context, customerID string) ([]EarnBurnProgram, error) {
+			return []EarnBurnProgram{
+				{CustomerSisfiID: "cs-1", CustomerID: customerID, Name: "Points", PointsRatio: 15, Active: true},
 			}, nil
 		},
 	}
@@ -45,57 +45,10 @@ func TestListPrograms_API(t *testing.T) {
 
 	assert.Equal(t, 200, w.Code)
 
-	var programs []Program
+	var programs []EarnBurnProgram
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &programs))
 	assert.Len(t, programs, 1)
 	assert.Equal(t, "Points", programs[0].Name)
-}
-
-func TestCreateProgram_API(t *testing.T) {
-	repo := &mockRepo{
-		createProgramFn: func(_ context.Context, p *Program) error {
-			p.ID = "new-prog"
-			return nil
-		},
-	}
-	r := setupAPIRouter(repo)
-
-	body := `{"customer_id":"cust-1","type":"earn_burn","name":"Points","points_ratio":1000}`
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/programs", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, 201, w.Code)
-
-	var resp map[string]string
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, "new-prog", resp["id"])
-}
-
-func TestCreateProgram_API_MissingFields(t *testing.T) {
-	r := setupAPIRouter(&mockRepo{})
-
-	body := `{"customer_id":"cust-1"}`
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/programs", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, 400, w.Code)
-}
-
-func TestUpdateProgram_API(t *testing.T) {
-	repo := &mockRepo{}
-	r := setupAPIRouter(repo)
-
-	body := `{"name":"Updated","points_ratio":500}`
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/v1/programs/prog-1", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, 200, w.Code)
 }
 
 func TestCreateReward_API(t *testing.T) {
@@ -109,20 +62,24 @@ func TestCreateReward_API(t *testing.T) {
 
 	body := `{"name":"Cafe","points_cost":100}`
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/programs/prog-1/rewards", strings.NewReader(body))
+	req, _ := http.NewRequest("POST", "/api/v1/programs/cs-1/rewards", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, 201, w.Code)
 
-	var resp map[string]string
+	var resp Reward
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, "new-rw", resp["id"])
+	assert.Equal(t, "new-rw", resp.ID)
+	assert.Equal(t, "Cafe", resp.Name)
+	assert.Equal(t, 100, resp.PointsCost)
+	assert.Equal(t, "cs-1", resp.CustomerSisfiID)
+	assert.True(t, resp.Active)
 }
 
 func TestListRewards_API(t *testing.T) {
 	repo := &mockRepo{
-		listAllRewardsFn: func(_ context.Context, programID string) ([]Reward, error) {
+		listAllRewardsFn: func(_ context.Context, customerSisfiID string) ([]Reward, error) {
 			return []Reward{
 				{ID: "rw-1", Name: "Cafe", PointsCost: 100},
 				{ID: "rw-2", Name: "Pizza", PointsCost: 200},
@@ -132,7 +89,7 @@ func TestListRewards_API(t *testing.T) {
 	r := setupAPIRouter(repo)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/programs/prog-1/rewards", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/programs/cs-1/rewards", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
@@ -144,14 +101,14 @@ func TestListRewards_API(t *testing.T) {
 
 func TestGetClientBalance_API(t *testing.T) {
 	repo := &mockRepo{
-		getBalanceFn: func(_ context.Context, clientID, programID string) (int, error) {
+		getBalanceFn: func(_ context.Context, clientID, customerSisfiID string) (int, error) {
 			return 150, nil
 		},
 	}
 	r := setupAPIRouter(repo)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/programs/prog-1/clients/client-1/balance", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/programs/cs-1/clients/client-1/balance", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
@@ -160,7 +117,7 @@ func TestGetClientBalance_API(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, float64(150), resp["balance"])
 	assert.Equal(t, "client-1", resp["client_id"])
-	assert.Equal(t, "prog-1", resp["program_id"])
+	assert.Equal(t, "cs-1", resp["customer_sisfi_id"])
 }
 
 func TestGetClientTransactions_API(t *testing.T) {
@@ -175,7 +132,7 @@ func TestGetClientTransactions_API(t *testing.T) {
 	r := setupAPIRouter(repo)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/programs/prog-1/clients/client-1/transactions", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/programs/cs-1/clients/client-1/transactions", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
@@ -290,7 +247,7 @@ func TestUpdateReward_API(t *testing.T) {
 
 	body := `{"name":"Updated","points_cost":200}`
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/v1/programs/prog-1/rewards/rw-1", strings.NewReader(body))
+	req, _ := http.NewRequest("PUT", "/api/v1/programs/cs-1/rewards/rw-1", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 

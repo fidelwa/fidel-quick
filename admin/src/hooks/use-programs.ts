@@ -13,7 +13,7 @@ export function usePrograms(customerId: string) {
 export function useCreateProgram() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: { customer_id: string; type: string; name: string; points_ratio: number }) =>
+    mutationFn: (data: { customer_id: string; name: string; points_ratio: number }) =>
       createProgram(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["programs"] })

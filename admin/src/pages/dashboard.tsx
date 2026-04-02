@@ -178,7 +178,7 @@ export function DashboardPage() {
                     <TableCell>
                       <Badge variant="outline">Earn-Burn</Badge>
                     </TableCell>
-                    <TableCell>{prog.points_ratio} pts/$</TableCell>
+                    <TableCell>1 pt / ${prog.points_ratio}</TableCell>
                     <TableCell>
                       <Badge variant={prog.active ? "default" : "secondary"}>
                         {prog.active ? "Activo" : "Inactivo"}

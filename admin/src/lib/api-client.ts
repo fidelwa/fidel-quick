@@ -1,5 +1,7 @@
 import type {
   Customer,
+  Sisfi,
+  CustomerSisfi,
   Program,
   Reward,
   CashbackProgram,
@@ -12,6 +14,8 @@ import type {
   Balance,
   AuthResponse,
   OnboardingRegisterRequest,
+  GoogleOnboardingRequest,
+  OnboardingStatus,
 } from "@/types"
 
 const BASE_URL = import.meta.env.VITE_API_URL || "/api/v1"
@@ -55,11 +59,30 @@ export const updateCustomer = (id: string, data: Partial<Customer>) =>
     body: JSON.stringify(data),
   })
 
+// SISFI catalog & customer-sisfi
+export const getSisfi = () =>
+  request<Sisfi[]>(`/sisfi`)
+
+export const getCustomerSisfi = (customerId: string) =>
+  request<CustomerSisfi[]>(`/customer-sisfi?customer_id=${customerId}`)
+
+export const createCustomerSisfi = (data: { customer_id: string; sisfi_id: string; name: string }) =>
+  request<CustomerSisfi>(`/customer-sisfi`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+
+export const updateCustomerSisfi = (id: string, data: Partial<Pick<CustomerSisfi, "name" | "active">>) =>
+  request<void>(`/customer-sisfi/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  })
+
 // Programs (earn-burn)
 export const getPrograms = (customerId: string) =>
   request<Program[]>(`/programs?customer_id=${customerId}`)
 
-export const createProgram = (data: { customer_id: string; type: string; name: string; points_ratio: number }) =>
+export const createProgram = (data: { customer_id: string; name: string; points_ratio: number }) =>
   request<Program>(`/programs`, {
     method: "POST",
     body: JSON.stringify(data),
@@ -170,5 +193,31 @@ export const onboardingRegister = (data: OnboardingRegisterRequest) =>
     body: JSON.stringify(data),
   })
 
-export const checkSlug = (slug: string) =>
-  request<{ available: boolean }>(`/onboarding/check-slug/${slug}`)
+export const onboardingGoogle = (data: GoogleOnboardingRequest) =>
+  request<AuthResponse>(`/onboarding/register/google`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+
+// Google Auth
+export const loginGoogle = (googleToken: string) =>
+  request<AuthResponse>(`/auth/login/google`, {
+    method: "POST",
+    body: JSON.stringify({ google_token: googleToken }),
+  })
+
+// Onboarding
+export const getOnboarding = () =>
+  request<OnboardingStatus>(`/onboarding`)
+
+export const updateOnboardingStep = (step: number) =>
+  request<OnboardingStatus>(`/onboarding/step`, {
+    method: "PUT",
+    body: JSON.stringify({ step }),
+  })
+
+export const completeOnboarding = () =>
+  request<OnboardingStatus>(`/onboarding/complete`, {
+    method: "POST",
+  })
+

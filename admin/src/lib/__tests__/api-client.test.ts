@@ -19,7 +19,8 @@ import {
   loginAdmin,
   registerAdmin,
   onboardingRegister,
-  checkSlug,
+  onboardingGoogle,
+  loginGoogle,
 } from "../api-client"
 
 const mockFetch = vi.fn()
@@ -149,7 +150,7 @@ describe("program endpoints", () => {
   })
 
   it("createProgram sends POST", async () => {
-    const data = { customer_id: "c1", type: "earn-burn", name: "Test", points_ratio: 100 }
+    const data = { customer_id: "c1", name: "Test", points_ratio: 100 }
     mockResponse({ id: "p1", ...data })
     const result = await createProgram(data)
     expect(mockFetch).toHaveBeenCalledWith(
@@ -284,20 +285,26 @@ describe("onboarding endpoints", () => {
     )
   })
 
-  it("checkSlug sends GET to correct URL", async () => {
-    mockResponse({ available: true })
-    const result = await checkSlug("mi-negocio")
+  it("onboardingGoogle sends POST with google token", async () => {
+    const data = {
+      google_token: "gtoken", name: "Test", phone: "+52551234",
+    }
+    mockResponse({ token: "t1", admin: { id: "a1", email: "a@b.com", customer_id: "c1" } })
+    await onboardingGoogle(data)
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining("/onboarding/check-slug/mi-negocio"),
-      expect.any(Object)
+      expect.stringContaining("/onboarding/register/google"),
+      expect.objectContaining({ method: "POST", body: JSON.stringify(data) })
     )
-    expect(result.available).toBe(true)
   })
 
-  it("checkSlug returns false for taken slug", async () => {
-    mockResponse({ available: false })
-    const result = await checkSlug("taken-slug")
-    expect(result.available).toBe(false)
+  it("loginGoogle sends POST with google token", async () => {
+    mockResponse({ token: "t1", admin: { id: "a1", email: "a@b.com", customer_id: "c1" } })
+    const result = await loginGoogle("gtoken")
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("/auth/login/google"),
+      expect.objectContaining({ method: "POST" })
+    )
+    expect(result.token).toBe("t1")
   })
 })
 

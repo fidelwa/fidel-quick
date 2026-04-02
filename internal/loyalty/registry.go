@@ -3,6 +3,7 @@ package loyalty
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -11,16 +12,18 @@ import (
 type Registry struct {
 	modules  map[string]Module
 	commands map[string]string // command_id → module_name
+	prefixes map[string]string // prefix → module_name
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
 		modules:  make(map[string]Module),
 		commands: make(map[string]string),
+		prefixes: make(map[string]string),
 	}
 }
 
-// Register adds a module to the registry and indexes its commands.
+// Register adds a module to the registry and indexes its commands and prefixes.
 func (r *Registry) Register(m Module) {
 	r.modules[m.Name()] = m
 
@@ -34,6 +37,11 @@ func (r *Registry) Register(m Module) {
 	// Index all flow commands
 	for cmdID := range m.FlowDefinitions() {
 		r.commands[cmdID] = m.Name()
+	}
+
+	// Index prefixes for selection routing
+	for _, prefix := range m.Prefixes() {
+		r.prefixes[prefix] = m.Name()
 	}
 }
 
@@ -97,6 +105,21 @@ func (r *Registry) Dispatch(ctx context.Context, cmd Command) (*CommandResult, e
 	}
 	m := r.modules[moduleName]
 	return m.HandleCommand(ctx, cmd)
+}
+
+// ResolveSelection checks if a selection ID matches a registered prefix.
+// Returns the flow command ID and data map, or empty string if no match.
+func (r *Registry) ResolveSelection(selectionID string) (string, map[string]string) {
+	for prefix, moduleName := range r.prefixes {
+		if strings.HasPrefix(selectionID, prefix) {
+			itemID := strings.TrimPrefix(selectionID, prefix)
+			m := r.modules[moduleName]
+			// Module determines which flow command and data key to use
+			flowCmd, dataKey := m.SelectionFlow(prefix)
+			return flowCmd, map[string]string{dataKey: itemID}
+		}
+	}
+	return "", nil
 }
 
 // RegisterAllRoutes registers all module REST API routes.

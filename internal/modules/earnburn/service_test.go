@@ -16,56 +16,54 @@ import (
 // --- Mock Repository ---
 
 type mockRepo struct {
-	getProgramFn                   func(ctx context.Context, customerID string) (*Program, error)
-	getBalanceFn                   func(ctx context.Context, clientID, programID string) (int, error)
+	getProgramFn                   func(ctx context.Context, customerID string) (*EarnBurnProgram, error)
+	getBalanceFn                   func(ctx context.Context, clientID, customerSisfiID string) (int, error)
 	addPointsTxFn                  func(ctx context.Context, t *Transaction) (int, error)
 	getTransactionFn               func(ctx context.Context, id string) (*Transaction, error)
 	adjustPointsTxFn               func(ctx context.Context, t *Transaction) (int, error)
-	listTransactionsFn             func(ctx context.Context, clientID, programID string, limit int) ([]Transaction, error)
+	listTransactionsFn             func(ctx context.Context, clientID, customerSisfiID string, limit int) ([]Transaction, error)
 	listCorrectableTransactionsFn  func(ctx context.Context, clientID string) ([]Transaction, error)
 	getRewardFn                    func(ctx context.Context, id string) (*Reward, error)
-	listRewardsFn                  func(ctx context.Context, customerID, programID string, maxPoints int) ([]Reward, error)
+	listRewardsFn                  func(ctx context.Context, customerID, customerSisfiID string, maxPoints int) ([]Reward, error)
 	burnPointsTxFn                 func(ctx context.Context, t *Transaction, rd *Redemption) error
 	getRedemptionByCodeFn          func(ctx context.Context, code string) (*Redemption, error)
 	confirmRedemptionFn            func(ctx context.Context, id, collaboratorID string) error
 	getClientNameFn                func(ctx context.Context, clientID string) (string, error)
 	createFeedbackFn               func(ctx context.Context, clientID, customerID, message string) error
-	listProgramsFn                 func(ctx context.Context, customerID string) ([]Program, error)
-	createProgramFn                func(ctx context.Context, p *Program) error
-	updateProgramFn                func(ctx context.Context, p *Program) error
+	listProgramsFn                 func(ctx context.Context, customerID string) ([]EarnBurnProgram, error)
 	getCustomerFn                  func(ctx context.Context, id string) (*Customer, error)
 	createCustomerFn               func(ctx context.Context, c *Customer) error
 	updateCustomerFn               func(ctx context.Context, c *Customer) error
 	createCollaboratorFn           func(ctx context.Context, c *Collaborator) error
 	listCollaboratorsFn            func(ctx context.Context, customerID string) ([]Collaborator, error)
-	listAllRewardsFn               func(ctx context.Context, programID string) ([]Reward, error)
-	createRewardAdminFn            func(ctx context.Context, programID string, r *Reward) error
+	listAllRewardsFn               func(ctx context.Context, customerSisfiID string) ([]Reward, error)
+	createRewardAdminFn            func(ctx context.Context, customerSisfiID string, r *Reward) error
 	updateRewardAdminFn            func(ctx context.Context, r *Reward) error
 	listFeedbackFn                 func(ctx context.Context, customerID string) ([]FeedbackEntry, error)
 	listClientsFn                  func(ctx context.Context, customerID string) ([]Client, error)
 }
 
-func (m *mockRepo) GetProgram(ctx context.Context, customerID string) (*Program, error) {
+func (m *mockRepo) GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error) {
 	if m.getProgramFn != nil {
 		return m.getProgramFn(ctx, customerID)
 	}
-	return &Program{ID: "prog-1", CustomerID: customerID, Type: "earn_burn", PointsRatio: 1000, Active: true}, nil
+	return &EarnBurnProgram{CustomerSisfiID: "cs-1", CustomerID: customerID, PointsRatio: 10, Active: true}, nil
 }
-func (m *mockRepo) GetProgramByID(ctx context.Context, programID string) (*Program, error) {
+func (m *mockRepo) GetProgramByID(ctx context.Context, customerSisfiID string) (*EarnBurnProgram, error) {
 	if m.getProgramFn != nil {
-		return m.getProgramFn(ctx, programID)
+		return m.getProgramFn(ctx, customerSisfiID)
 	}
-	return &Program{ID: programID, CustomerID: "cust-1", Type: "earn_burn", PointsRatio: 1000, Active: true}, nil
+	return &EarnBurnProgram{CustomerSisfiID: customerSisfiID, CustomerID: "cust-1", PointsRatio: 10, Active: true}, nil
 }
 
-func (m *mockRepo) GetBalance(ctx context.Context, clientID, programID string) (int, error) {
+func (m *mockRepo) GetBalance(ctx context.Context, clientID, customerSisfiID string) (int, error) {
 	if m.getBalanceFn != nil {
-		return m.getBalanceFn(ctx, clientID, programID)
+		return m.getBalanceFn(ctx, clientID, customerSisfiID)
 	}
 	return 0, nil
 }
 
-func (m *mockRepo) UpsertBalance(ctx context.Context, clientID, programID string, delta int) (int, error) {
+func (m *mockRepo) UpsertBalance(ctx context.Context, clientID, customerSisfiID string, delta int) (int, error) {
 	return delta, nil
 }
 
@@ -78,9 +76,9 @@ func (m *mockRepo) GetTransaction(ctx context.Context, id string) (*Transaction,
 	return nil, fmt.Errorf("not found")
 }
 
-func (m *mockRepo) ListTransactions(ctx context.Context, clientID, programID string, limit int) ([]Transaction, error) {
+func (m *mockRepo) ListTransactions(ctx context.Context, clientID, customerSisfiID string, limit int) ([]Transaction, error) {
 	if m.listTransactionsFn != nil {
-		return m.listTransactionsFn(ctx, clientID, programID, limit)
+		return m.listTransactionsFn(ctx, clientID, customerSisfiID, limit)
 	}
 	return nil, nil
 }
@@ -99,9 +97,9 @@ func (m *mockRepo) GetClientName(ctx context.Context, clientID string) (string, 
 	return "Test Client", nil
 }
 
-func (m *mockRepo) ListRewards(ctx context.Context, customerID, programID string, maxPoints int) ([]Reward, error) {
+func (m *mockRepo) ListRewards(ctx context.Context, customerID, customerSisfiID string, maxPoints int) ([]Reward, error) {
 	if m.listRewardsFn != nil {
-		return m.listRewardsFn(ctx, customerID, programID, maxPoints)
+		return m.listRewardsFn(ctx, customerID, customerSisfiID, maxPoints)
 	}
 	return nil, nil
 }
@@ -141,26 +139,11 @@ func (m *mockRepo) CreateFeedback(ctx context.Context, clientID, customerID, mes
 	return nil
 }
 
-func (m *mockRepo) ListPrograms(ctx context.Context, customerID string) ([]Program, error) {
+func (m *mockRepo) ListPrograms(ctx context.Context, customerID string) ([]EarnBurnProgram, error) {
 	if m.listProgramsFn != nil {
 		return m.listProgramsFn(ctx, customerID)
 	}
-	return []Program{{ID: "prog-1", CustomerID: customerID, Type: "earn_burn"}}, nil
-}
-
-func (m *mockRepo) CreateProgram(ctx context.Context, p *Program) error {
-	if m.createProgramFn != nil {
-		return m.createProgramFn(ctx, p)
-	}
-	p.ID = "new-prog"
-	return nil
-}
-
-func (m *mockRepo) UpdateProgram(ctx context.Context, p *Program) error {
-	if m.updateProgramFn != nil {
-		return m.updateProgramFn(ctx, p)
-	}
-	return nil
+	return []EarnBurnProgram{{CustomerSisfiID: "cs-1", CustomerID: customerID}}, nil
 }
 
 func (m *mockRepo) GetCustomer(ctx context.Context, id string) (*Customer, error) {
@@ -200,16 +183,16 @@ func (m *mockRepo) ListCollaborators(ctx context.Context, customerID string) ([]
 	return nil, nil
 }
 
-func (m *mockRepo) ListAllRewards(ctx context.Context, programID string) ([]Reward, error) {
+func (m *mockRepo) ListAllRewards(ctx context.Context, customerSisfiID string) ([]Reward, error) {
 	if m.listAllRewardsFn != nil {
-		return m.listAllRewardsFn(ctx, programID)
+		return m.listAllRewardsFn(ctx, customerSisfiID)
 	}
 	return nil, nil
 }
 
-func (m *mockRepo) CreateRewardAdmin(ctx context.Context, programID string, r *Reward) error {
+func (m *mockRepo) CreateRewardAdmin(ctx context.Context, customerSisfiID string, r *Reward) error {
 	if m.createRewardAdminFn != nil {
-		return m.createRewardAdminFn(ctx, programID, r)
+		return m.createRewardAdminFn(ctx, customerSisfiID, r)
 	}
 	r.ID = "new-reward"
 	return nil
@@ -259,8 +242,11 @@ func (m *mockRepo) AdjustPointsTx(ctx context.Context, t *Transaction) (int, err
 	return 100, nil
 }
 
-func (m *mockRepo) EnsureBalance(ctx context.Context, clientID, programID string) error {
+func (m *mockRepo) EnsureBalance(ctx context.Context, clientID, customerSisfiID string) error {
 	return nil
+}
+func (m *mockRepo) GetClientPhone(ctx context.Context, clientID string) (string, error) {
+	return "", nil
 }
 
 // --- Mock Cache ---
@@ -339,42 +325,42 @@ func newTestService(repo *mockRepo, cache *mockCache) *Service {
 
 func TestAddPoints_Success(t *testing.T) {
 	repo := &mockRepo{
-		getProgramFn: func(_ context.Context, _ string) (*Program, error) {
-			return &Program{ID: "prog-1", PointsRatio: 1000}, nil
+		getProgramFn: func(_ context.Context, _ string) (*EarnBurnProgram, error) {
+			return &EarnBurnProgram{CustomerSisfiID: "cs-1", PointsRatio: 15}, nil
 		},
 		addPointsTxFn: func(_ context.Context, tx *Transaction) (int, error) {
 			assert.Equal(t, "earn", tx.Type)
-			assert.Equal(t, 5, tx.Amount) // 5000/1000 = 5
-			return 5, nil
+			assert.Equal(t, 10, tx.Amount) // 150 / 15 = 10
+			return 10, nil
 		},
 	}
 	cache := newMockCache()
 	svc := newTestService(repo, cache)
 
 	tx, err := svc.AddPoints(context.Background(), AddPointsReq{
-		ClientID:  "client-1",
-		ProgramID: "prog-1",
-		Amount:    5000, // 5000 / 1000 ratio = 5 points
+		ClientID:        "client-1",
+		CustomerSisfiID: "cs-1",
+		Amount:          150, // 150 / 15 ratio = 10 points
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, 5, tx.Amount)
-	assert.Equal(t, 5, tx.BalanceAfter)
+	assert.Equal(t, 10, tx.Amount)
+	assert.Equal(t, 10, tx.BalanceAfter)
 	assert.Equal(t, "earn", tx.Type)
 	assert.NotNil(t, tx.CorrectableUntil)
 }
 
 func TestAddPoints_InsufficientAmount(t *testing.T) {
 	repo := &mockRepo{
-		getProgramFn: func(_ context.Context, _ string) (*Program, error) {
-			return &Program{ID: "prog-1", PointsRatio: 1000}, nil
+		getProgramFn: func(_ context.Context, _ string) (*EarnBurnProgram, error) {
+			return &EarnBurnProgram{CustomerSisfiID: "cs-1", PointsRatio: 15}, nil
 		},
 	}
 	svc := newTestService(repo, newMockCache())
 
 	_, err := svc.AddPoints(context.Background(), AddPointsReq{
 		ClientID: "client-1",
-		Amount:   500, // 500 / 1000 = 0 points
+		Amount:   5, // 5 / 15 = 0 points
 	})
 
 	require.Error(t, err)
@@ -383,7 +369,7 @@ func TestAddPoints_InsufficientAmount(t *testing.T) {
 
 func TestAddPoints_ProgramNotFound(t *testing.T) {
 	repo := &mockRepo{
-		getProgramFn: func(_ context.Context, _ string) (*Program, error) {
+		getProgramFn: func(_ context.Context, _ string) (*EarnBurnProgram, error) {
 			return nil, fmt.Errorf("get program: %w", sql.ErrNoRows)
 		},
 	}
@@ -406,7 +392,7 @@ func TestCheckBalance(t *testing.T) {
 	}
 	svc := newTestService(repo, newMockCache())
 
-	balance, err := svc.CheckBalance(context.Background(), "client-1", "prog-1")
+	balance, err := svc.CheckBalance(context.Background(), "client-1", "cs-1")
 
 	require.NoError(t, err)
 	assert.Equal(t, 42, balance)
@@ -424,7 +410,7 @@ func TestListTransactions(t *testing.T) {
 	}
 	svc := newTestService(repo, newMockCache())
 
-	txs, err := svc.ListTransactions(context.Background(), "client-1", "prog-1", 10)
+	txs, err := svc.ListTransactions(context.Background(), "client-1", "cs-1", 10)
 
 	require.NoError(t, err)
 	assert.Len(t, txs, 2)
@@ -437,7 +423,7 @@ func TestUpdatePoints_Success(t *testing.T) {
 	repo := &mockRepo{
 		getTransactionFn: func(_ context.Context, id string) (*Transaction, error) {
 			return &Transaction{
-				ID: id, ClientID: "client-1", ProgramID: "prog-1",
+				ID: id, ClientID: "client-1", CustomerSisfiID: "cs-1",
 				Amount: 10, CorrectableUntil: &future,
 			}, nil
 		},
@@ -498,9 +484,9 @@ func TestRequestRedemption_Success(t *testing.T) {
 	svc := newTestService(repo, cache)
 
 	rd, code, err := svc.RequestRedemption(context.Background(), RedemptionReq{
-		ClientID:  "client-1",
-		ProgramID: "prog-1",
-		RewardID:  "reward-1",
+		ClientID:        "client-1",
+		CustomerSisfiID: "cs-1",
+		RewardID:        "reward-1",
 	})
 
 	require.NoError(t, err)
@@ -527,9 +513,9 @@ func TestRequestRedemption_InsufficientBalance(t *testing.T) {
 	svc := newTestService(repo, newMockCache())
 
 	_, _, err := svc.RequestRedemption(context.Background(), RedemptionReq{
-		ClientID:  "client-1",
-		ProgramID: "prog-1",
-		RewardID:  "reward-1",
+		ClientID:        "client-1",
+		CustomerSisfiID: "cs-1",
+		RewardID:        "reward-1",
 	})
 
 	require.Error(t, err)
@@ -724,7 +710,7 @@ func TestSubmitFeedback(t *testing.T) {
 
 func TestGetProgram_NotFound(t *testing.T) {
 	repo := &mockRepo{
-		getProgramFn: func(_ context.Context, _ string) (*Program, error) {
+		getProgramFn: func(_ context.Context, _ string) (*EarnBurnProgram, error) {
 			return nil, sql.ErrNoRows
 		},
 	}
@@ -738,10 +724,10 @@ func TestGetProgram_NotFound(t *testing.T) {
 
 func TestListPrograms(t *testing.T) {
 	repo := &mockRepo{
-		listProgramsFn: func(_ context.Context, customerID string) ([]Program, error) {
-			return []Program{
-				{ID: "p-1", CustomerID: customerID, Type: "earn_burn"},
-				{ID: "p-2", CustomerID: customerID, Type: "earn_burn"},
+		listProgramsFn: func(_ context.Context, customerID string) ([]EarnBurnProgram, error) {
+			return []EarnBurnProgram{
+				{CustomerSisfiID: "cs-1", CustomerID: customerID},
+				{CustomerSisfiID: "cs-2", CustomerID: customerID},
 			}, nil
 		},
 	}
@@ -751,25 +737,6 @@ func TestListPrograms(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, programs, 2)
-}
-
-func TestCreateProgram(t *testing.T) {
-	var called bool
-	repo := &mockRepo{
-		createProgramFn: func(_ context.Context, p *Program) error {
-			called = true
-			p.ID = "new-prog"
-			return nil
-		},
-	}
-	svc := newTestService(repo, newMockCache())
-
-	p := &Program{CustomerID: "cust-1", Type: "earn_burn", Name: "Test"}
-	err := svc.CreateProgram(context.Background(), p)
-
-	require.NoError(t, err)
-	assert.True(t, called)
-	assert.Equal(t, "new-prog", p.ID)
 }
 
 func TestGenerateCode(t *testing.T) {

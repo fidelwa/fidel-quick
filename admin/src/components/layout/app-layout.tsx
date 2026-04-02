@@ -2,21 +2,28 @@ import { useState } from "react"
 import { Outlet, Navigate } from "react-router-dom"
 import { useAuth } from "@/context/auth-context"
 import { useCustomer } from "@/hooks/use-customer"
+import { useOnboardingStatus } from "@/hooks/use-onboarding-status"
 import { Sidebar } from "./sidebar"
 import { Header } from "./header"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 
 export function AppLayout() {
-  const { isAuthenticated, customerId } = useAuth()
+  const { isAuthenticated, customerId, logout } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { data: customer, isLoading: customerLoading } = useCustomer(customerId)
+  const { isLoading: customerLoading, isError } = useCustomer(customerId)
+  const { data: onboardingStatus, isLoading: onboardingLoading } = useOnboardingStatus(isAuthenticated)
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />
   }
 
-  if (customerLoading) {
+  if (isError) {
+    logout()
+    return <Navigate to="/login" replace />
+  }
+
+  if (customerLoading || onboardingLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Skeleton className="h-12 w-48" />
@@ -24,7 +31,7 @@ export function AppLayout() {
     )
   }
 
-  if (customer && !customer.onboarding_completed) {
+  if (onboardingStatus && !onboardingStatus.completed) {
     return <Navigate to="/onboarding" replace />
   }
 

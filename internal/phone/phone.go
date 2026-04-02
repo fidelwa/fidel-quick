@@ -49,3 +49,21 @@ func Variants(phone string) []string {
 	}
 	return result
 }
+
+// SameNumber checks if two phone numbers refer to the same person
+// by comparing their normalized variants.
+func SameNumber(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	va := Variants(a)
+	vb := Variants(b)
+	for _, x := range va {
+		for _, y := range vb {
+			if x == y {
+				return true
+			}
+		}
+	}
+	return false
+}

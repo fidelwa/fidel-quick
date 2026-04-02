@@ -11,8 +11,10 @@ import (
 // --- Mock Repository ---
 
 type mockRepo struct {
-	getByEmailFn func(email string) (*Admin, error)
-	createFn     func(admin *Admin) error
+	getByEmailFn     func(email string) (*Admin, error)
+	createFn         func(admin *Admin) error
+	createCustomerFn func(name, slug, phone, description string) (string, error)
+	slugExistsFn     func(slug string) (bool, error)
 }
 
 func (m *mockRepo) GetByEmail(email string) (*Admin, error) {
@@ -30,6 +32,20 @@ func (m *mockRepo) Create(admin *Admin) error {
 	return nil
 }
 
+func (m *mockRepo) CreateCustomer(name, slug, phone, description string) (string, error) {
+	if m.createCustomerFn != nil {
+		return m.createCustomerFn(name, slug, phone, description)
+	}
+	return "new-cust", nil
+}
+
+func (m *mockRepo) SlugExists(slug string) (bool, error) {
+	if m.slugExistsFn != nil {
+		return m.slugExistsFn(slug)
+	}
+	return false, nil
+}
+
 // --- Tests ---
 
 func TestLogin_Success(t *testing.T) {
@@ -45,7 +61,7 @@ func TestLogin_Success(t *testing.T) {
 			}, nil
 		},
 	}
-	svc := NewService(repo, "test-secret")
+	svc := NewService(repo, "test-secret", "")
 
 	resp, err := svc.Login("admin@test.com", "password123")
 
@@ -63,7 +79,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 			return &Admin{PasswordHash: string(hash)}, nil
 		},
 	}
-	svc := NewService(repo, "test-secret")
+	svc := NewService(repo, "test-secret", "")
 
 	_, err := svc.Login("admin@test.com", "wrong")
 
@@ -77,7 +93,7 @@ func TestLogin_UserNotFound(t *testing.T) {
 			return nil, &notFoundErr{}
 		},
 	}
-	svc := NewService(repo, "test-secret")
+	svc := NewService(repo, "test-secret", "")
 
 	_, err := svc.Login("nonexistent@test.com", "password")
 
@@ -93,7 +109,7 @@ func TestRegister_Success(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, "test-secret")
+	svc := NewService(repo, "test-secret", "")
 
 	resp, err := svc.Register("new@test.com", "password123", "cust-1")
 
@@ -114,7 +130,7 @@ func TestRegister_DuplicateEmail(t *testing.T) {
 			return &duplicateErr{}
 		},
 	}
-	svc := NewService(repo, "test-secret")
+	svc := NewService(repo, "test-secret", "")
 
 	_, err := svc.Register("existing@test.com", "password123", "cust-1")
 
@@ -122,7 +138,7 @@ func TestRegister_DuplicateEmail(t *testing.T) {
 }
 
 func TestGenerateJWT(t *testing.T) {
-	svc := NewService(&mockRepo{}, "test-secret-key")
+	svc := NewService(&mockRepo{}, "test-secret-key", "")
 
 	admin := &Admin{
 		ID:         "admin-1",

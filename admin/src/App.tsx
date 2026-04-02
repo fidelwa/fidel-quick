@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { GoogleOAuthProvider } from "@react-oauth/google"
 import { Toaster } from "@/components/ui/sonner"
 import { AuthProvider } from "@/context/auth-context"
 import { AppLayout } from "@/components/layout/app-layout"
@@ -25,8 +26,16 @@ const queryClient = new QueryClient({
   },
 })
 
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ""
+
+function GoogleWrapper({ children }: { children: React.ReactNode }) {
+  if (!GOOGLE_CLIENT_ID) return <>{children}</>
+  return <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>{children}</GoogleOAuthProvider>
+}
+
 function App() {
   return (
+    <GoogleWrapper>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
@@ -51,6 +60,7 @@ function App() {
         <Toaster />
       </AuthProvider>
     </QueryClientProvider>
+    </GoogleWrapper>
   )
 }
 

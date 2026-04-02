@@ -1,7 +1,8 @@
 import { useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAuth } from "@/context/auth-context"
-import { useCustomer, useUpdateCustomer } from "@/hooks/use-customer"
+import { useCustomer } from "@/hooks/use-customer"
+import { useCompleteOnboarding } from "@/hooks/use-onboarding-status"
 import { QRCodeCanvas } from "qrcode.react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -29,7 +30,7 @@ export function StepReady({
 }: StepReadyProps) {
   const { customerId } = useAuth()
   const { data: customer } = useCustomer(customerId)
-  const updateCustomer = useUpdateCustomer(customerId)
+  const completeOnboarding = useCompleteOnboarding()
   const navigate = useNavigate()
   const qrRef = useRef<HTMLDivElement>(null)
   const [finishing, setFinishing] = useState(false)
@@ -58,7 +59,7 @@ export function StepReady({
   const handleFinish = async () => {
     setFinishing(true)
     try {
-      await updateCustomer.mutateAsync({ onboarding_completed: true } as Partial<import("@/types").Customer>)
+      await completeOnboarding.mutateAsync()
       navigate("/")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Error al finalizar")

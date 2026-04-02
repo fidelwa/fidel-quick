@@ -17,11 +17,13 @@ const (
 
 // UserContext holds the resolved session data for a user.
 type UserContext struct {
-	CustomerID    string   `json:"customer_id"`
-	Role          string   `json:"role"`           // "client" or "collaborator"
-	UserID        string   `json:"user_id"`        // client_id or collaborator_id
-	BusinessName  string   `json:"business_name"`
-	ActiveModules []string `json:"active_modules"` // e.g. ["earn_burn", "cashback"]
+	CustomerID     string   `json:"customer_id"`
+	Role           string   `json:"role"`                        // "client" or "collaborator"
+	UserID         string   `json:"user_id"`                     // client_id or collaborator_id
+	BusinessName   string   `json:"business_name"`
+	ActiveModules  []string `json:"active_modules"`              // e.g. ["earn_burn", "cashback"]
+	CollaboratorID string   `json:"collaborator_id,omitempty"`   // set when user is also a collaborator
+	ClientID       string   `json:"client_id,omitempty"`         // set when user is also a client
 }
 
 // FlowState holds the current step-by-step flow state.

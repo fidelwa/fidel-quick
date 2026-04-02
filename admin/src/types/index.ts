@@ -8,13 +8,34 @@ export interface Customer {
   description: string
   welcome_message: string
   active: boolean
-  onboarding_completed: boolean
+}
+
+export interface OnboardingStatus {
+  id?: string
+  customer_id?: string
+  current_step: number
+  completed: boolean
+  completed_at?: string
+}
+
+export interface Sisfi {
+  id: string
+  name: string
+  description: string
+  active: boolean
+}
+
+export interface CustomerSisfi {
+  id: string
+  customer_id: string
+  sisfi_id: string
+  name: string
+  active: boolean
 }
 
 export interface Program {
   id: string
   customer_id: string
-  type: string
   name: string
   points_ratio: number
   active: boolean
@@ -23,7 +44,7 @@ export interface Program {
 export interface Reward {
   id: string
   customer_id: string
-  program_id: string
+  customer_sisfi_id: string
   name: string
   description: string
   points_cost: number
@@ -33,7 +54,6 @@ export interface Reward {
 export interface CashbackProgram {
   id: string
   customer_id: string
-  type: string
   name: string
   cashback_rate: number
   active: boolean
@@ -42,7 +62,7 @@ export interface CashbackProgram {
 export interface CashbackReward {
   id: string
   customer_id: string
-  program_id: string
+  customer_sisfi_id: string
   name: string
   description: string
   cost: number
@@ -76,7 +96,7 @@ export interface FeedbackEntry {
 export interface Transaction {
   id: string
   client_id: string
-  program_id: string
+  customer_sisfi_id: string
   collaborator_id: string
   type: "earn" | "burn" | "adjustment"
   amount: number
@@ -93,7 +113,7 @@ export interface Transaction {
 export interface CashbackTransaction {
   id: string
   client_id: string
-  program_id: string
+  customer_sisfi_id: string
   collaborator_id: string
   type: "earn" | "burn" | "adjustment"
   amount: number
@@ -110,18 +130,25 @@ export interface CashbackTransaction {
 
 export interface Balance {
   client_id: string
-  program_id: string
+  customer_sisfi_id: string
   balance: number
 }
 
 export interface OnboardingRegisterRequest {
   name: string
-  slug: string
   phone: string
+  country_code?: string
   description?: string
   logo_url?: string
   admin_email: string
   admin_password: string
+}
+
+export interface GoogleOnboardingRequest {
+  google_token: string
+  name: string
+  phone: string
+  description?: string
 }
 
 export interface AuthResponse {

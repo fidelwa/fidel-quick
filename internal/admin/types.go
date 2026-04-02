@@ -23,6 +23,14 @@ type RegisterRequest struct {
 	CustomerID string `json:"customer_id" binding:"required,uuid"`
 }
 
+type OnboardingRequest struct {
+	Name          string `json:"name" binding:"required"`
+	Phone         string `json:"phone" binding:"required"`
+	Description   string `json:"description"`
+	AdminEmail    string `json:"admin_email" binding:"required,email"`
+	AdminPassword string `json:"admin_password" binding:"required,min=8"`
+}
+
 type AuthResponse struct {
 	Token string       `json:"token"`
 	Admin AdminSummary `json:"admin"`
@@ -32,4 +40,15 @@ type AdminSummary struct {
 	ID         string `json:"id"`
 	Email      string `json:"email"`
 	CustomerID string `json:"customer_id"`
+}
+
+type GoogleOnboardingRequest struct {
+	GoogleToken string `json:"google_token" binding:"required"`
+	Name        string `json:"name" binding:"required"`
+	Phone       string `json:"phone" binding:"required"`
+	Description string `json:"description"`
+}
+
+type GoogleLoginRequest struct {
+	GoogleToken string `json:"google_token" binding:"required"`
 }

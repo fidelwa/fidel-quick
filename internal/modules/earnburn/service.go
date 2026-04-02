@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	otpCodeLength     = 6
-	correctionWindow  = 2 * time.Hour
-	redemptionExpiry  = 1 * time.Hour
+	otpCodeLength    = 6
+	correctionWindow = 2 * time.Hour
+	redemptionExpiry = 1 * time.Hour
 )
 
 type Service struct {
@@ -32,7 +32,7 @@ func NewService(repo Repository, cache Cache, log *slog.Logger) *Service {
 
 // AddPoints calculates points from purchase amount and credits them.
 func (s *Service) AddPoints(ctx context.Context, req AddPointsReq) (*Transaction, error) {
-	program, err := s.repo.GetProgramByID(ctx, req.ProgramID)
+	program, err := s.repo.GetProgramByID(ctx, req.CustomerSisfiID)
 	if err != nil {
 		return nil, fmt.Errorf("get program: %w", err)
 	}
@@ -46,7 +46,7 @@ func (s *Service) AddPoints(ctx context.Context, req AddPointsReq) (*Transaction
 	tx := &Transaction{
 		ID:               generateUUID(),
 		ClientID:         req.ClientID,
-		ProgramID:        req.ProgramID,
+		CustomerSisfiID:  req.CustomerSisfiID,
 		CollaboratorID:   req.CollaboratorID,
 		Type:             "earn",
 		Amount:           points,
@@ -73,13 +73,13 @@ func (s *Service) AddPoints(ctx context.Context, req AddPointsReq) (*Transaction
 }
 
 // CheckBalance returns the current balance for a client.
-func (s *Service) CheckBalance(ctx context.Context, clientID, programID string) (int, error) {
-	return s.repo.GetBalance(ctx, clientID, programID)
+func (s *Service) CheckBalance(ctx context.Context, clientID, customerSisfiID string) (int, error) {
+	return s.repo.GetBalance(ctx, clientID, customerSisfiID)
 }
 
 // ListTransactions returns recent transactions.
-func (s *Service) ListTransactions(ctx context.Context, clientID, programID string, limit int) ([]Transaction, error) {
-	return s.repo.ListTransactions(ctx, clientID, programID, limit)
+func (s *Service) ListTransactions(ctx context.Context, clientID, customerSisfiID string, limit int) ([]Transaction, error) {
+	return s.repo.ListTransactions(ctx, clientID, customerSisfiID, limit)
 }
 
 // ListCorrectableTransactions returns transactions within the 2h correction window.
@@ -103,7 +103,7 @@ func (s *Service) UpdatePoints(ctx context.Context, req UpdatePointsReq) (*Trans
 	tx := &Transaction{
 		ID:                    generateUUID(),
 		ClientID:              original.ClientID,
-		ProgramID:             original.ProgramID,
+		CustomerSisfiID:       original.CustomerSisfiID,
 		CollaboratorID:        req.CollaboratorID,
 		Type:                  "adjustment",
 		Amount:                delta,
@@ -130,8 +130,8 @@ func (s *Service) UpdatePoints(ctx context.Context, req UpdatePointsReq) (*Trans
 }
 
 // ListRewards returns rewards the client can afford.
-func (s *Service) ListRewards(ctx context.Context, customerID, programID string, maxPoints int) ([]Reward, error) {
-	return s.repo.ListRewards(ctx, customerID, programID, maxPoints)
+func (s *Service) ListRewards(ctx context.Context, customerID, customerSisfiID string, maxPoints int) ([]Reward, error) {
+	return s.repo.ListRewards(ctx, customerID, customerSisfiID, maxPoints)
 }
 
 // RequestRedemption creates a pending redemption with a temporary code.
@@ -141,7 +141,7 @@ func (s *Service) RequestRedemption(ctx context.Context, req RedemptionReq) (*Re
 		return nil, "", fmt.Errorf("get reward: %w", err)
 	}
 
-	balance, err := s.repo.GetBalance(ctx, req.ClientID, req.ProgramID)
+	balance, err := s.repo.GetBalance(ctx, req.ClientID, req.CustomerSisfiID)
 	if err != nil {
 		return nil, "", fmt.Errorf("get balance: %w", err)
 	}
@@ -152,23 +152,23 @@ func (s *Service) RequestRedemption(ctx context.Context, req RedemptionReq) (*Re
 
 	code := generateCode(otpCodeLength)
 	rd := &Redemption{
-		ID:          generateUUID(),
-		ClientID:    req.ClientID,
-		RewardID:    req.RewardID,
-		ProgramID:   req.ProgramID,
-		Code:        code,
-		Status:      "pending",
-		PointsSpent: reward.PointsCost,
-		ExpiresAt:   time.Now().Add(redemptionExpiry),
+		ID:              generateUUID(),
+		ClientID:        req.ClientID,
+		RewardID:        req.RewardID,
+		CustomerSisfiID: req.CustomerSisfiID,
+		Code:            code,
+		Status:          "pending",
+		PointsSpent:     reward.PointsCost,
+		ExpiresAt:       time.Now().Add(redemptionExpiry),
 	}
 
 	tx := &Transaction{
-		ID:        generateUUID(),
-		ClientID:  req.ClientID,
-		ProgramID: req.ProgramID,
-		Type:      "burn",
-		Amount:    -reward.PointsCost,
-		Description: fmt.Sprintf("Canje: %s", reward.Name),
+		ID:              generateUUID(),
+		ClientID:        req.ClientID,
+		CustomerSisfiID: req.CustomerSisfiID,
+		Type:            "burn",
+		Amount:          -reward.PointsCost,
+		Description:     fmt.Sprintf("Canje: %s", reward.Name),
 	}
 
 	if err := s.repo.BurnPointsTx(ctx, tx, rd); err != nil {
@@ -241,7 +241,7 @@ func (s *Service) ConfirmRedemption(ctx context.Context, code, collaboratorID st
 	return rd, nil
 }
 
-// RequestLoadPointsCode generates a temporary code for client→collaborator handoff.
+// RequestLoadPointsCode generates a temporary code for client->collaborator handoff.
 func (s *Service) RequestLoadPointsCode(ctx context.Context, clientID, customerID string) (string, error) {
 	code := generateCode(otpCodeLength)
 	otpData := &OTPData{
@@ -316,6 +316,10 @@ func (s *Service) GetClientName(ctx context.Context, clientID string) (string, e
 	return s.repo.GetClientName(ctx, clientID)
 }
 
+func (s *Service) GetClientPhone(ctx context.Context, clientID string) (string, error) {
+	return s.repo.GetClientPhone(ctx, clientID)
+}
+
 // SubmitFeedback stores client feedback.
 func (s *Service) SubmitFeedback(ctx context.Context, clientID, customerID, message string) error {
 	return s.repo.CreateFeedback(ctx, clientID, customerID, message)
@@ -323,7 +327,7 @@ func (s *Service) SubmitFeedback(ctx context.Context, clientID, customerID, mess
 
 // --- Passthroughs for module.go ---
 
-func (s *Service) GetProgram(ctx context.Context, customerID string) (*Program, error) {
+func (s *Service) GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error) {
 	p, err := s.repo.GetProgram(ctx, customerID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -347,26 +351,12 @@ func (s *Service) GetReward(ctx context.Context, id string) (*Reward, error) {
 
 // --- Admin CRUD ---
 
-func (s *Service) ListPrograms(ctx context.Context, customerID string) ([]Program, error) {
+func (s *Service) ListPrograms(ctx context.Context, customerID string) ([]EarnBurnProgram, error) {
 	programs, err := s.repo.ListPrograms(ctx, customerID)
 	if err != nil {
 		return nil, apperror.Internal("error al listar programas", err)
 	}
 	return programs, nil
-}
-
-func (s *Service) CreateProgram(ctx context.Context, p *Program) error {
-	if err := s.repo.CreateProgram(ctx, p); err != nil {
-		return apperror.Internal("error al crear programa", err)
-	}
-	return nil
-}
-
-func (s *Service) UpdateProgram(ctx context.Context, p *Program) error {
-	if err := s.repo.UpdateProgram(ctx, p); err != nil {
-		return apperror.Internal("error al actualizar programa", err)
-	}
-	return nil
 }
 
 func (s *Service) GetCustomer(ctx context.Context, id string) (*Customer, error) {
@@ -409,16 +399,16 @@ func (s *Service) ListCollaborators(ctx context.Context, customerID string) ([]C
 	return collabs, nil
 }
 
-func (s *Service) ListAllRewards(ctx context.Context, programID string) ([]Reward, error) {
-	rewards, err := s.repo.ListAllRewards(ctx, programID)
+func (s *Service) ListAllRewards(ctx context.Context, customerSisfiID string) ([]Reward, error) {
+	rewards, err := s.repo.ListAllRewards(ctx, customerSisfiID)
 	if err != nil {
 		return nil, apperror.Internal("error al listar recompensas", err)
 	}
 	return rewards, nil
 }
 
-func (s *Service) CreateRewardAdmin(ctx context.Context, programID string, r *Reward) error {
-	if err := s.repo.CreateRewardAdmin(ctx, programID, r); err != nil {
+func (s *Service) CreateRewardAdmin(ctx context.Context, customerSisfiID string, r *Reward) error {
+	if err := s.repo.CreateRewardAdmin(ctx, customerSisfiID, r); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return apperror.NotFound("programa no encontrado", err)
 		}
@@ -450,8 +440,8 @@ func (s *Service) ListFeedback(ctx context.Context, customerID string) ([]Feedba
 	return entries, nil
 }
 
-func (s *Service) GetBalance(ctx context.Context, clientID, programID string) (int, error) {
-	return s.repo.GetBalance(ctx, clientID, programID)
+func (s *Service) GetBalance(ctx context.Context, clientID, customerSisfiID string) (int, error) {
+	return s.repo.GetBalance(ctx, clientID, customerSisfiID)
 }
 
 // generateCode creates a random alphanumeric code.

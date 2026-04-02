@@ -11,7 +11,9 @@ import (
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
 	"github.com/theluisbolivar/fidel-quick/internal/landing"
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
+	"github.com/theluisbolivar/fidel-quick/internal/onboarding"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/whatsapp"
+	"github.com/theluisbolivar/fidel-quick/internal/sisfi"
 )
 
 //go:embed openapi.yaml
@@ -25,6 +27,8 @@ func SetupRouter(
 	webhookHandler *whatsapp.WebhookHandler,
 	registry *loyalty.Registry,
 	adminAPI *admin.APIHandler,
+	onboardingAPI *onboarding.APIHandler,
+	sisfiAPI *sisfi.APIHandler,
 	log *slog.Logger,
 	isDev bool,
 ) *gin.Engine {
@@ -48,15 +52,31 @@ func SetupRouter(
 		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(swaggerHTML))
 	})
 
+	// Sisfi catalog (public — no auth required)
+	sisfiPublic := r.Group("/api/v1")
+	sisfiPublic.Use(apperror.ErrorHandler(log))
+	sisfiAPI.RegisterPublicRoutes(sisfiPublic)
+
 	// Auth endpoints (public — no auth required)
 	auth := r.Group("/api/v1/auth")
 	auth.Use(apperror.ErrorHandler(log))
 	adminAPI.RegisterRoutes(auth)
 
+	// Onboarding endpoints (public — no auth required)
+	onboarding := r.Group("/api/v1/onboarding")
+	onboarding.Use(apperror.ErrorHandler(log))
+	adminAPI.RegisterOnboardingRoutes(onboarding)
+
 	// REST API (JWT or bearer token auth + error middleware)
 	v1 := r.Group("/api/v1")
 	v1.Use(middleware.JWTOrBearer(jwtSecret, bearerToken))
 	v1.Use(apperror.ErrorHandler(log))
+
+	// Onboarding routes (JWT-authenticated)
+	onboardingAPI.RegisterRoutes(v1)
+
+	// Sisfi routes (JWT-authenticated)
+	sisfiAPI.RegisterRoutes(v1)
 
 	// Module REST routes (each module registers its own)
 	registry.RegisterAllRoutes(v1)

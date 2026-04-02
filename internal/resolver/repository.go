@@ -152,9 +152,9 @@ func (r *PostgresRepository) GetCustomerBySlug(ctx context.Context, slug string)
 
 func (r *PostgresRepository) GetActiveProgramTypes(ctx context.Context, customerID string) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT 'earn_burn' AS module FROM programs WHERE customer_id = $1 AND active = true
-		UNION
-		SELECT 'cashback' AS module FROM cashback_programs WHERE customer_id = $1 AND active = true
+		SELECT cs.sisfi_id FROM customer_sisfi cs
+		JOIN sisfi s ON s.id = cs.sisfi_id AND s.active = true
+		WHERE cs.customer_id = $1 AND cs.active = true
 	`, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("query active program types: %w", err)
@@ -171,3 +171,4 @@ func (r *PostgresRepository) GetActiveProgramTypes(ctx context.Context, customer
 	}
 	return modules, nil
 }
+

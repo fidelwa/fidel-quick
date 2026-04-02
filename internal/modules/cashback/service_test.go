@@ -17,23 +17,21 @@ import (
 
 type mockRepo struct {
 	getProgramFn              func(ctx context.Context, customerID string) (*CashbackProgram, error)
-	getBalanceFn              func(ctx context.Context, clientID, programID string) (float64, error)
+	getBalanceFn              func(ctx context.Context, clientID, customerSisfiID string) (float64, error)
 	addCashbackTxFn           func(ctx context.Context, t *CashbackTransaction) (float64, error)
 	getTransactionFn          func(ctx context.Context, id string) (*CashbackTransaction, error)
 	adjustCashbackTxFn        func(ctx context.Context, t *CashbackTransaction) (float64, error)
-	listTransactionsFn        func(ctx context.Context, clientID, programID string, limit int) ([]CashbackTransaction, error)
+	listTransactionsFn        func(ctx context.Context, clientID, customerSisfiID string, limit int) ([]CashbackTransaction, error)
 	getRewardFn               func(ctx context.Context, id string) (*CashbackReward, error)
-	listRewardsFn             func(ctx context.Context, customerID, programID string, maxCost float64) ([]CashbackReward, error)
+	listRewardsFn             func(ctx context.Context, customerID, customerSisfiID string, maxCost float64) ([]CashbackReward, error)
 	burnCashbackTxFn          func(ctx context.Context, t *CashbackTransaction, rd *CashbackRedemption) error
 	getRedemptionByCodeFn     func(ctx context.Context, code string) (*CashbackRedemption, error)
 	confirmRedemptionFn       func(ctx context.Context, id, collaboratorID string) error
 	getClientNameFn           func(ctx context.Context, clientID string) (string, error)
 	createFeedbackFn          func(ctx context.Context, clientID, customerID, message string) error
 	listProgramsFn            func(ctx context.Context, customerID string) ([]CashbackProgram, error)
-	createProgramFn           func(ctx context.Context, p *CashbackProgram) error
-	updateProgramFn           func(ctx context.Context, p *CashbackProgram) error
-	listAllRewardsFn          func(ctx context.Context, programID string) ([]CashbackReward, error)
-	createRewardAdminFn       func(ctx context.Context, programID string, r *CashbackReward) error
+	listAllRewardsFn          func(ctx context.Context, customerSisfiID string) ([]CashbackReward, error)
+	createRewardAdminFn       func(ctx context.Context, customerSisfiID string, r *CashbackReward) error
 	updateRewardAdminFn       func(ctx context.Context, r *CashbackReward) error
 }
 
@@ -41,21 +39,21 @@ func (m *mockRepo) GetProgram(ctx context.Context, customerID string) (*Cashback
 	if m.getProgramFn != nil {
 		return m.getProgramFn(ctx, customerID)
 	}
-	return &CashbackProgram{ID: "prog-1", CustomerID: customerID, CashbackRate: 0.05, Active: true}, nil
+	return &CashbackProgram{CustomerSisfiID: "cs-1", CustomerID: customerID, CashbackRate: 0.05, Active: true}, nil
 }
-func (m *mockRepo) GetProgramByID(ctx context.Context, programID string) (*CashbackProgram, error) {
+func (m *mockRepo) GetProgramByID(ctx context.Context, customerSisfiID string) (*CashbackProgram, error) {
 	if m.getProgramFn != nil {
-		return m.getProgramFn(ctx, programID)
+		return m.getProgramFn(ctx, customerSisfiID)
 	}
-	return &CashbackProgram{ID: programID, CustomerID: "cust-1", CashbackRate: 0.05, Active: true}, nil
+	return &CashbackProgram{CustomerSisfiID: customerSisfiID, CustomerID: "cust-1", CashbackRate: 0.05, Active: true}, nil
 }
-func (m *mockRepo) GetBalance(ctx context.Context, clientID, programID string) (float64, error) {
+func (m *mockRepo) GetBalance(ctx context.Context, clientID, customerSisfiID string) (float64, error) {
 	if m.getBalanceFn != nil {
-		return m.getBalanceFn(ctx, clientID, programID)
+		return m.getBalanceFn(ctx, clientID, customerSisfiID)
 	}
 	return 0, nil
 }
-func (m *mockRepo) UpsertBalance(ctx context.Context, clientID, programID string, delta float64) (float64, error) {
+func (m *mockRepo) UpsertBalance(ctx context.Context, clientID, customerSisfiID string, delta float64) (float64, error) {
 	return delta, nil
 }
 func (m *mockRepo) CreateTransaction(ctx context.Context, tx *CashbackTransaction) error { return nil }
@@ -65,9 +63,9 @@ func (m *mockRepo) GetTransaction(ctx context.Context, id string) (*CashbackTran
 	}
 	return nil, fmt.Errorf("not found")
 }
-func (m *mockRepo) ListTransactions(ctx context.Context, clientID, programID string, limit int) ([]CashbackTransaction, error) {
+func (m *mockRepo) ListTransactions(ctx context.Context, clientID, customerSisfiID string, limit int) ([]CashbackTransaction, error) {
 	if m.listTransactionsFn != nil {
-		return m.listTransactionsFn(ctx, clientID, programID, limit)
+		return m.listTransactionsFn(ctx, clientID, customerSisfiID, limit)
 	}
 	return nil, nil
 }
@@ -80,9 +78,9 @@ func (m *mockRepo) GetClientName(ctx context.Context, clientID string) (string, 
 	}
 	return "Test Client", nil
 }
-func (m *mockRepo) ListRewards(ctx context.Context, customerID, programID string, maxCost float64) ([]CashbackReward, error) {
+func (m *mockRepo) ListRewards(ctx context.Context, customerID, customerSisfiID string, maxCost float64) ([]CashbackReward, error) {
 	if m.listRewardsFn != nil {
-		return m.listRewardsFn(ctx, customerID, programID, maxCost)
+		return m.listRewardsFn(ctx, customerID, customerSisfiID, maxCost)
 	}
 	return nil, nil
 }
@@ -90,7 +88,7 @@ func (m *mockRepo) GetReward(ctx context.Context, id string) (*CashbackReward, e
 	if m.getRewardFn != nil {
 		return m.getRewardFn(ctx, id)
 	}
-	return &CashbackReward{ID: id, CustomerID: "cust-1", Cost: 10.0, Name: "Beneficio"}, nil
+	return &CashbackReward{ID: id, CustomerID: "cust-1", Cost: 10.0, Name: "Recompensa"}, nil
 }
 func (m *mockRepo) CreateReward(ctx context.Context, r *CashbackReward) error         { return nil }
 func (m *mockRepo) UpdateReward(ctx context.Context, r *CashbackReward) error         { return nil }
@@ -120,28 +118,15 @@ func (m *mockRepo) ListPrograms(ctx context.Context, customerID string) ([]Cashb
 	}
 	return nil, nil
 }
-func (m *mockRepo) CreateProgram(ctx context.Context, p *CashbackProgram) error {
-	if m.createProgramFn != nil {
-		return m.createProgramFn(ctx, p)
-	}
-	p.ID = "new-prog"
-	return nil
-}
-func (m *mockRepo) UpdateProgram(ctx context.Context, p *CashbackProgram) error {
-	if m.updateProgramFn != nil {
-		return m.updateProgramFn(ctx, p)
-	}
-	return nil
-}
-func (m *mockRepo) ListAllRewards(ctx context.Context, programID string) ([]CashbackReward, error) {
+func (m *mockRepo) ListAllRewards(ctx context.Context, customerSisfiID string) ([]CashbackReward, error) {
 	if m.listAllRewardsFn != nil {
-		return m.listAllRewardsFn(ctx, programID)
+		return m.listAllRewardsFn(ctx, customerSisfiID)
 	}
 	return nil, nil
 }
-func (m *mockRepo) CreateRewardAdmin(ctx context.Context, programID string, r *CashbackReward) error {
+func (m *mockRepo) CreateRewardAdmin(ctx context.Context, customerSisfiID string, r *CashbackReward) error {
 	if m.createRewardAdminFn != nil {
-		return m.createRewardAdminFn(ctx, programID, r)
+		return m.createRewardAdminFn(ctx, customerSisfiID, r)
 	}
 	r.ID = "new-reward"
 	return nil
@@ -170,8 +155,13 @@ func (m *mockRepo) AdjustCashbackTx(ctx context.Context, t *CashbackTransaction)
 	}
 	return 100.0, nil
 }
-func (m *mockRepo) EnsureBalance(ctx context.Context, clientID, programID string) error { return nil }
-func (m *mockRepo) WithTx(ctx context.Context, fn func(tx *sql.Tx) error) error        { return nil }
+func (m *mockRepo) EnsureBalance(ctx context.Context, clientID, customerSisfiID string) error {
+	return nil
+}
+func (m *mockRepo) WithTx(ctx context.Context, fn func(tx *sql.Tx) error) error { return nil }
+func (m *mockRepo) GetClientPhone(ctx context.Context, clientID string) (string, error) {
+	return "", nil
+}
 
 // --- Mock Cache ---
 
@@ -236,7 +226,7 @@ func newTestService(repo *mockRepo, cache *mockCache) *Service {
 func TestAddCashback_Success(t *testing.T) {
 	repo := &mockRepo{
 		getProgramFn: func(_ context.Context, _ string) (*CashbackProgram, error) {
-			return &CashbackProgram{ID: "prog-1", CashbackRate: 0.05}, nil
+			return &CashbackProgram{CustomerSisfiID: "cs-1", CashbackRate: 0.05}, nil
 		},
 		addCashbackTxFn: func(_ context.Context, tx *CashbackTransaction) (float64, error) {
 			assert.Equal(t, "earn", tx.Type)
@@ -247,9 +237,9 @@ func TestAddCashback_Success(t *testing.T) {
 	svc := newTestService(repo, newMockCache())
 
 	tx, err := svc.AddCashback(context.Background(), AddCashbackReq{
-		ClientID:  "client-1",
-		ProgramID: "prog-1",
-		Amount:    100.0,
+		ClientID:        "client-1",
+		CustomerSisfiID: "cs-1",
+		Amount:          100.0,
 	})
 
 	require.NoError(t, err)
@@ -262,7 +252,7 @@ func TestAddCashback_Success(t *testing.T) {
 func TestAddCashback_InsufficientAmount(t *testing.T) {
 	repo := &mockRepo{
 		getProgramFn: func(_ context.Context, _ string) (*CashbackProgram, error) {
-			return &CashbackProgram{ID: "prog-1", CashbackRate: 0.05}, nil
+			return &CashbackProgram{CustomerSisfiID: "cs-1", CashbackRate: 0.05}, nil
 		},
 	}
 	svc := newTestService(repo, newMockCache())
@@ -284,7 +274,7 @@ func TestCheckBalance(t *testing.T) {
 	}
 	svc := newTestService(repo, newMockCache())
 
-	balance, err := svc.CheckBalance(context.Background(), "client-1", "prog-1")
+	balance, err := svc.CheckBalance(context.Background(), "client-1", "cs-1")
 
 	require.NoError(t, err)
 	assert.Equal(t, 42.50, balance)
@@ -295,7 +285,7 @@ func TestUpdateCashback_Success(t *testing.T) {
 	repo := &mockRepo{
 		getTransactionFn: func(_ context.Context, id string) (*CashbackTransaction, error) {
 			return &CashbackTransaction{
-				ID: id, ClientID: "client-1", ProgramID: "prog-1",
+				ID: id, ClientID: "client-1", CustomerSisfiID: "cs-1",
 				Amount: 5.0, CorrectableUntil: &future,
 			}, nil
 		},
@@ -360,9 +350,9 @@ func TestRequestRedemption_Success(t *testing.T) {
 	svc := newTestService(repo, cache)
 
 	rd, code, err := svc.RequestRedemption(context.Background(), CashbackRedemptionReq{
-		ClientID:  "client-1",
-		ProgramID: "prog-1",
-		RewardID:  "reward-1",
+		ClientID:        "client-1",
+		CustomerSisfiID: "cs-1",
+		RewardID:        "reward-1",
 	})
 
 	require.NoError(t, err)
@@ -547,7 +537,7 @@ func TestGetProgram_NotFound(t *testing.T) {
 func TestListPrograms(t *testing.T) {
 	repo := &mockRepo{
 		listProgramsFn: func(_ context.Context, _ string) ([]CashbackProgram, error) {
-			return []CashbackProgram{{ID: "p-1"}, {ID: "p-2"}}, nil
+			return []CashbackProgram{{CustomerSisfiID: "cs-1"}, {CustomerSisfiID: "cs-2"}}, nil
 		},
 	}
 	svc := newTestService(repo, newMockCache())
@@ -556,20 +546,4 @@ func TestListPrograms(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, programs, 2)
-}
-
-func TestCreateProgram(t *testing.T) {
-	repo := &mockRepo{
-		createProgramFn: func(_ context.Context, p *CashbackProgram) error {
-			p.ID = "new-prog"
-			return nil
-		},
-	}
-	svc := newTestService(repo, newMockCache())
-
-	p := &CashbackProgram{CustomerID: "cust-1", Name: "Test CB"}
-	err := svc.CreateProgram(context.Background(), p)
-
-	require.NoError(t, err)
-	assert.Equal(t, "new-prog", p.ID)
 }

@@ -51,12 +51,12 @@ export function ProgramsListPage() {
 
   const form = useForm<CreateFormValues>({
     resolver: zodResolver(createSchema),
-    defaultValues: { name: "", points_ratio: 1 },
+    defaultValues: { name: "", points_ratio: 15 },
   })
 
   const onSubmit = (values: CreateFormValues) => {
     createProgram.mutate(
-      { ...values, customer_id: customerId, type: "earn_burn" },
+      { ...values, customer_id: customerId },
       {
         onSuccess: () => {
           toast.success("Programa creado")
@@ -103,7 +103,7 @@ export function ProgramsListPage() {
                   name="points_ratio"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Ratio de puntos (por $1)</FormLabel>
+                      <FormLabel>1 punto por cada $</FormLabel>
                       <FormControl>
                         <Input type="number" min={1} {...field} onChange={(e) => field.onChange(Number(e.target.value))} />
                       </FormControl>
@@ -135,7 +135,7 @@ export function ProgramsListPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Nombre</TableHead>
-              <TableHead>Ratio de puntos</TableHead>
+              <TableHead>1 punto por</TableHead>
               <TableHead>Estado</TableHead>
               <TableHead className="w-10" />
             </TableRow>
@@ -144,7 +144,7 @@ export function ProgramsListPage() {
             {programs.map((p) => (
               <TableRow key={p.id}>
                 <TableCell className="font-medium">{p.name}</TableCell>
-                <TableCell>{formatPoints(p.points_ratio)} pts/$1</TableCell>
+                <TableCell>${formatPoints(p.points_ratio)}</TableCell>
                 <TableCell>
                   <Badge variant={p.active ? "default" : "secondary"}>
                     {p.active ? "Activo" : "Inactivo"}

@@ -3,6 +3,7 @@ package admin
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
 )
@@ -10,6 +11,8 @@ import (
 type Repository interface {
 	GetByEmail(email string) (*Admin, error)
 	Create(admin *Admin) error
+	CreateCustomer(name, slug, phone, description string) (customerID string, err error)
+	SlugExists(slug string) (bool, error)
 }
 
 type PostgresRepository struct {
@@ -52,6 +55,25 @@ func (r *PostgresRepository) Create(admin *Admin) error {
 		return apperror.Internal("failed to create admin", err)
 	}
 	return nil
+}
+
+func (r *PostgresRepository) CreateCustomer(name, slug, phone, description string) (string, error) {
+	var id string
+	err := r.db.QueryRow(
+		`INSERT INTO customers (name, slug, phone, description)
+		 VALUES ($1, $2, $3, NULLIF($4, '')) RETURNING id`,
+		name, slug, phone, description,
+	).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("create customer: %w", err)
+	}
+	return id, nil
+}
+
+func (r *PostgresRepository) SlugExists(slug string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM customers WHERE slug = $1)`, slug).Scan(&exists)
+	return exists, err
 }
 
 func isDuplicateKeyError(err error) bool {

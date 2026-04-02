@@ -1,13 +1,13 @@
 import { useEffect, useRef } from "react"
 import { Navigate } from "react-router-dom"
 import { useAuth } from "@/context/auth-context"
-import { useCustomer } from "@/hooks/use-customer"
 import { usePrograms } from "@/hooks/use-programs"
 import { useCashbackPrograms } from "@/hooks/use-cashback-programs"
 import { useCollaborators } from "@/hooks/use-collaborators"
 import { useRewards } from "@/hooks/use-rewards"
 import { useCashbackRewards } from "@/hooks/use-cashback-rewards"
 import { useOnboarding } from "@/hooks/use-onboarding"
+import { useOnboardingStatus, useUpdateOnboardingStep } from "@/hooks/use-onboarding-status"
 import { StepIndicator } from "@/components/onboarding/step-indicator"
 import { StepTransition } from "@/components/onboarding/step-transition"
 import { StepProgram } from "./step-program"
@@ -18,7 +18,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 export function OnboardingLayout() {
   const { isAuthenticated, customerId } = useAuth()
-  const { data: customer, isLoading: customerLoading } = useCustomer(customerId)
+  const { data: onboardingStatus, isLoading: onboardingLoading } = useOnboardingStatus(isAuthenticated)
+  const updateStep = useUpdateOnboardingStep()
   const { data: programs } = usePrograms(customerId)
   const { data: cashbackPrograms } = useCashbackPrograms(customerId)
   const { data: existingCollaborators } = useCollaborators(customerId)
@@ -35,8 +36,12 @@ export function OnboardingLayout() {
   // Reload recovery: sync server data into local state and jump to correct step
   useEffect(() => {
     if (recoveryDone.current) return
-    // Wait until queries have resolved
+    // Wait until base queries have resolved
     if (programs === undefined || cashbackPrograms === undefined) return
+
+    // If there are programs, wait for their rewards to resolve too (sequential fetch)
+    if (earnBurnProgramFromServer && existingRewards === undefined) return
+    if (cashbackProgramFromServer && existingCbRewards === undefined) return
 
     if (earnBurnProgramFromServer) {
       onboarding.setEarnBurnProgram(earnBurnProgramFromServer)
@@ -54,19 +59,23 @@ export function OnboardingLayout() {
       onboarding.setCollaborators(existingCollaborators)
     }
 
-    // Calculate initial step
-    const hasPrograms = (programs?.length ?? 0) > 0 || (cashbackPrograms?.length ?? 0) > 0
-    if (hasPrograms) {
-      const hasRewards = (existingRewards?.length ?? 0) > 0 || (existingCbRewards?.length ?? 0) > 0
-      if (hasRewards) {
-        const hasCollaborators = (existingCollaborators?.length ?? 0) > 0
-        if (hasCollaborators) {
-          onboarding.goToStep(4)
+    // Use server step if available, otherwise calculate from data
+    if (onboardingStatus?.current_step && onboardingStatus.current_step > 1) {
+      onboarding.goToStep(onboardingStatus.current_step)
+    } else {
+      const hasPrograms = (programs?.length ?? 0) > 0 || (cashbackPrograms?.length ?? 0) > 0
+      if (hasPrograms) {
+        const hasRewards = (existingRewards?.length ?? 0) > 0 || (existingCbRewards?.length ?? 0) > 0
+        if (hasRewards) {
+          const hasCollaborators = (existingCollaborators?.length ?? 0) > 0
+          if (hasCollaborators) {
+            onboarding.goToStep(4)
+          } else {
+            onboarding.goToStep(3)
+          }
         } else {
-          onboarding.goToStep(3)
+          onboarding.goToStep(2)
         }
-      } else {
-        onboarding.goToStep(2)
       }
     }
 
@@ -80,13 +89,23 @@ export function OnboardingLayout() {
     existingRewards,
     existingCbRewards,
     existingCollaborators,
+    onboardingStatus,
   ])
+
+  // Persist step changes to server
+  const prevStepRef = useRef(onboarding.currentStep)
+  useEffect(() => {
+    if (onboarding.currentStep !== prevStepRef.current && recoveryDone.current) {
+      prevStepRef.current = onboarding.currentStep
+      updateStep.mutate(onboarding.currentStep)
+    }
+  }, [onboarding.currentStep, updateStep])
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />
   }
 
-  if (customerLoading) {
+  if (onboardingLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="w-full max-w-2xl space-y-6 p-4">
@@ -97,7 +116,7 @@ export function OnboardingLayout() {
     )
   }
 
-  if (customer?.onboarding_completed) {
+  if (onboardingStatus?.completed) {
     return <Navigate to="/" replace />
   }
 

@@ -5,7 +5,7 @@ import "time"
 type Transaction struct {
 	ID                    string     `json:"id"`
 	ClientID              string     `json:"client_id"`
-	ProgramID             string     `json:"program_id"`
+	CustomerSisfiID       string     `json:"customer_sisfi_id"`
 	CollaboratorID        string     `json:"collaborator_id"`
 	Type                  string     `json:"type"` // "earn", "burn", "adjustment"
 	Amount                int        `json:"amount"`
@@ -20,45 +20,44 @@ type Transaction struct {
 }
 
 type Reward struct {
-	ID          string `json:"id"`
-	CustomerID  string `json:"customer_id"`
-	ProgramID   string `json:"program_id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	PointsCost  int    `json:"points_cost"`
-	Active      bool   `json:"active"`
+	ID              string `json:"id"`
+	CustomerID      string `json:"customer_id"`
+	CustomerSisfiID string `json:"customer_sisfi_id"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	PointsCost      int    `json:"points_cost"`
+	Active          bool   `json:"active"`
 }
 
 type Redemption struct {
-	ID          string     `json:"id"`
-	ClientID    string     `json:"client_id"`
-	RewardID    string     `json:"reward_id"`
-	ProgramID   string     `json:"program_id"`
-	Code        string     `json:"code"`
-	Status      string     `json:"status"` // "pending", "confirmed", "expired", "cancelled"
-	PointsSpent int        `json:"points_spent"`
-	ConfirmedBy string     `json:"confirmed_by"`
-	ExpiresAt   time.Time  `json:"expires_at"`
-	ConfirmedAt *time.Time `json:"confirmed_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID              string     `json:"id"`
+	ClientID        string     `json:"client_id"`
+	RewardID        string     `json:"reward_id"`
+	CustomerSisfiID string     `json:"customer_sisfi_id"`
+	Code            string     `json:"code"`
+	Status          string     `json:"status"` // "pending", "confirmed", "expired", "cancelled"
+	PointsSpent     int        `json:"points_spent"`
+	ConfirmedBy     string     `json:"confirmed_by"`
+	ExpiresAt       time.Time  `json:"expires_at"`
+	ConfirmedAt     *time.Time `json:"confirmed_at"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
-type Program struct {
-	ID          string `json:"id"`
-	CustomerID  string `json:"customer_id"`
-	Type        string `json:"type"`
-	Name        string `json:"name"`
-	PointsRatio int    `json:"points_ratio"`
-	Active      bool   `json:"active"`
+type EarnBurnProgram struct {
+	CustomerSisfiID string `json:"customer_sisfi_id"`
+	CustomerID      string `json:"customer_id"`
+	Name            string `json:"name"`
+	PointsRatio     int    `json:"points_ratio"`
+	Active          bool   `json:"active"`
 }
 
 type AddPointsReq struct {
-	ClientID       string
-	ProgramID      string
-	CollaboratorID string
-	Amount         float64 // purchase amount in currency
-	InvoiceURL     string
-	ManualEntry    bool
+	ClientID        string
+	CustomerSisfiID string
+	CollaboratorID  string
+	Amount          float64 // purchase amount in currency
+	InvoiceURL      string
+	ManualEntry     bool
 }
 
 type UpdatePointsReq struct {
@@ -70,17 +69,17 @@ type UpdatePointsReq struct {
 }
 
 type RedemptionReq struct {
-	ClientID  string
-	ProgramID string
-	RewardID  string
+	ClientID        string
+	CustomerSisfiID string
+	RewardID        string
 }
 
 type LoadPointsReq struct {
-	ClientID       string
-	ProgramID      string
-	CollaboratorID string
-	Amount         float64 // purchase amount in currency
-	InvoiceURL     string
+	ClientID        string
+	CustomerSisfiID string
+	CollaboratorID  string
+	Amount          float64 // purchase amount in currency
+	InvoiceURL      string
 }
 
 type Customer struct {

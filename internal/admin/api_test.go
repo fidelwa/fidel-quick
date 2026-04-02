@@ -18,7 +18,7 @@ func init() {
 }
 
 func setupRouter(repo Repository) *gin.Engine {
-	svc := NewService(repo, "test-jwt-secret")
+	svc := NewService(repo, "test-jwt-secret", "")
 	handler := NewAPIHandler(svc)
 
 	r := gin.New()

@@ -1,0 +1,267 @@
+erDiagram
+    platform_config {
+        varchar key PK
+        text value
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    sisfi {
+        varchar id PK "earn_burn, cashback"
+        varchar name
+        text description
+        boolean active
+        timestamptz created_at
+    }
+
+    customers {
+        uuid id PK
+        varchar name
+        varchar slug UK
+        varchar phone
+        text address
+        text logo_url
+        text description
+        text welcome_message
+        varchar timezone
+        boolean active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    customer_sisfi {
+        uuid id PK
+        uuid customer_id FK
+        varchar sisfi_id FK
+        varchar name "nombre personalizado"
+        boolean active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    config_earnburn {
+        uuid id PK
+        uuid customer_sisfi_id FK_UK
+        int points_ratio "DEFAULT 1000, CHECK > 0"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    config_cashback {
+        uuid id PK
+        uuid customer_sisfi_id FK_UK
+        decimal cashback_rate "DECIMAL(5,4) CHECK > 0 AND <= 1"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    onboarding {
+        uuid id PK
+        uuid customer_id FK_UK
+        int current_step "DEFAULT 1"
+        boolean completed
+        timestamptz completed_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    admins {
+        uuid id PK
+        uuid customer_id FK
+        varchar email UK
+        text password_hash
+        boolean active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    collaborators {
+        uuid id PK
+        uuid customer_id FK
+        varchar name
+        varchar phone "UNIQUE(customer_id, phone)"
+        varchar hash_id UK
+        boolean active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    clients {
+        uuid id PK
+        uuid customer_id FK
+        varchar name
+        varchar phone "UNIQUE(customer_id, phone)"
+        varchar hash UK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    feedback {
+        uuid id PK
+        uuid client_id FK
+        uuid customer_id FK
+        text message
+        timestamptz created_at
+    }
+
+    %% ════════════════════════════════════════
+    %% SISTEMA: EARNBURN (Puntos)
+    %% ════════════════════════════════════════
+
+    rewards_earnburn {
+        uuid id PK
+        uuid customer_id FK
+        uuid customer_sisfi_id FK
+        varchar name
+        text description
+        int points_cost
+        boolean active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    balances_earnburn {
+        uuid id PK
+        uuid client_id FK
+        uuid customer_sisfi_id FK "UNIQUE(client_id, customer_sisfi_id)"
+        int balance "CHECK >= 0"
+        timestamptz updated_at
+    }
+
+    transactions_earnburn {
+        uuid id PK
+        uuid client_id FK
+        uuid customer_sisfi_id FK
+        uuid collaborator_id FK "nullable"
+        varchar type "earn, burn, adjustment"
+        int amount
+        int balance_after
+        text invoice_url
+        text description
+        boolean manual_entry
+        text correction_reason
+        text correction_evidence_url
+        timestamptz correctable_until
+        timestamptz created_at
+    }
+
+    redemptions_earnburn {
+        uuid id PK
+        uuid client_id FK
+        uuid reward_id FK
+        uuid customer_sisfi_id FK
+        varchar code UK
+        varchar status "pending, confirmed, expired, cancelled"
+        int points_spent
+        uuid confirmed_by FK "nullable, collaborators"
+        timestamptz expires_at
+        timestamptz confirmed_at
+        timestamptz created_at
+    }
+
+    %% ════════════════════════════════════════
+    %% SISTEMA: CASHBACK
+    %% ════════════════════════════════════════
+
+    rewards_cashback {
+        uuid id PK
+        uuid customer_id FK
+        uuid customer_sisfi_id FK
+        varchar name
+        text description
+        decimal cost "DECIMAL(12,2)"
+        boolean active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    balances_cashback {
+        uuid id PK
+        uuid client_id FK
+        uuid customer_sisfi_id FK "UNIQUE(client_id, customer_sisfi_id)"
+        decimal balance "DECIMAL(12,2) CHECK >= 0"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    transactions_cashback {
+        uuid id PK
+        uuid client_id FK
+        uuid customer_sisfi_id FK
+        uuid collaborator_id FK "nullable"
+        varchar type "earn, burn, adjustment"
+        decimal amount "DECIMAL(12,2)"
+        decimal purchase_amount "DECIMAL(12,2) nullable"
+        decimal balance_after "DECIMAL(12,2)"
+        text invoice_url
+        text description
+        boolean manual_entry
+        text correction_reason
+        text correction_evidence_url
+        timestamptz correctable_until
+        timestamptz created_at
+    }
+
+    redemptions_cashback {
+        uuid id PK
+        uuid client_id FK
+        uuid reward_id FK
+        uuid customer_sisfi_id FK
+        varchar code UK
+        varchar status "pending, confirmed, expired, cancelled"
+        decimal amount_spent "DECIMAL(12,2)"
+        uuid confirmed_by FK "nullable, collaborators"
+        timestamptz expires_at
+        timestamptz confirmed_at
+        timestamptz created_at
+    }
+
+    %% ════════════════════════════════════════
+    %% RELACIONES
+    %% ════════════════════════════════════════
+
+    %% Catalogo SISFI
+    sisfi ||--o{ customer_sisfi : "define tipos"
+
+    %% Customer → entidades
+    customers ||--o{ customer_sisfi : "activa sistemas"
+    customers ||--o{ admins : "tiene"
+    customers ||--o| onboarding : "estado"
+    customers ||--o{ collaborators : "emplea"
+    customers ||--o{ clients : "atiende"
+    customers ||--o{ feedback : "recibe"
+
+    %% Config por sistema
+    customer_sisfi ||--o| config_earnburn : "configura"
+    customer_sisfi ||--o| config_cashback : "configura"
+
+    %% Earnburn operacional
+    customer_sisfi ||--o{ rewards_earnburn : "ofrece"
+    customer_sisfi ||--o{ balances_earnburn : "rastrea"
+    customer_sisfi ||--o{ transactions_earnburn : "registra"
+    customer_sisfi ||--o{ redemptions_earnburn : "gestiona"
+
+    %% Cashback operacional
+    customer_sisfi ||--o{ rewards_cashback : "ofrece"
+    customer_sisfi ||--o{ balances_cashback : "rastrea"
+    customer_sisfi ||--o{ transactions_cashback : "registra"
+    customer_sisfi ||--o{ redemptions_cashback : "gestiona"
+
+    %% Collaborators → transacciones
+    collaborators ||--o{ transactions_earnburn : "procesa"
+    collaborators ||--o{ transactions_cashback : "procesa"
+    collaborators ||--o{ redemptions_earnburn : "confirma"
+    collaborators ||--o{ redemptions_cashback : "confirma"
+
+    %% Clients → balances y transacciones
+    clients ||--o{ balances_earnburn : "acumula"
+    clients ||--o{ transactions_earnburn : "genera"
+    clients ||--o{ balances_cashback : "acumula"
+    clients ||--o{ transactions_cashback : "genera"
+    clients ||--o{ redemptions_earnburn : "canjea"
+    clients ||--o{ redemptions_cashback : "canjea"
+    clients ||--o{ feedback : "envia"
+
+    %% Rewards → Redemptions
+    rewards_earnburn ||--o{ redemptions_earnburn : "canjeada en"
+    rewards_cashback ||--o{ redemptions_cashback : "canjeada en"
