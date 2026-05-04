@@ -15,6 +15,7 @@ import (
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
 	"github.com/theluisbolivar/fidel-quick/internal/modules/cashback"
 	"github.com/theluisbolivar/fidel-quick/internal/modules/earnburn"
+	"github.com/theluisbolivar/fidel-quick/internal/modules/pushcard"
 	"github.com/theluisbolivar/fidel-quick/internal/onboarding"
 	sisfiPkg "github.com/theluisbolivar/fidel-quick/internal/sisfi"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
@@ -81,6 +82,13 @@ func main() {
 	cbAPI := cashback.NewAPIHandler(cbService)
 	cbModule := cashback.NewModule(cbService, cbAPI)
 	registry.Register(cbModule)
+
+	// Pushcard module
+	pcRepo := pushcard.NewPostgresRepository(database)
+	pcService := pushcard.NewService(pcRepo, log)
+	pcAPI := pushcard.NewAPIHandler(pcService)
+	pcModule := pushcard.NewModule(pcService, pcAPI)
+	registry.Register(pcModule)
 
 	// WhatsApp client
 	waClient := whatsapp.NewClient(cfg.WhatsAppAPIToken, cfg.WhatsAppPhoneNumberID)
