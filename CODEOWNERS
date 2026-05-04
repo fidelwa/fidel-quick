@@ -1,0 +1,63 @@
+# CODEOWNERS — Fidel Quick
+#
+# Cualquier PR que toque estos paths requiere review del/los owners listados.
+# El último patrón que matchea gana, así que los más específicos van al final.
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-security/customizing-your-repository/about-code-owners
+
+# Default owner — todo lo no cubierto por reglas más específicas
+*                                   @TheLuisBolivar
+
+# ───── Backend (Go) ─────
+/cmd/                               @TheLuisBolivar
+/main.go                            @TheLuisBolivar
+/go.mod                             @TheLuisBolivar
+/go.sum                             @TheLuisBolivar
+
+# Plataforma compartida — DB, cache, WhatsApp, AI, storage
+/internal/platform/                 @TheLuisBolivar
+
+# Motor de flujos conversacionales (núcleo crítico)
+/internal/flow/                     @TheLuisBolivar
+
+# Resolución de roles y sesión
+/internal/resolver/                 @TheLuisBolivar
+/internal/session/                  @TheLuisBolivar
+
+# Registry y tipos compartidos de loyalty
+/internal/loyalty/                  @TheLuisBolivar
+
+# Módulos de fidelización (uno por subdir)
+/internal/modules/earnburn/         @TheLuisBolivar
+/internal/modules/cashback/         @TheLuisBolivar
+/internal/modules/pushcard/         @TheLuisBolivar
+
+# Onboarding, admin auth, landing
+/internal/admin/                    @TheLuisBolivar
+/internal/onboarding/               @TheLuisBolivar
+/internal/landing/                  @TheLuisBolivar
+
+# API HTTP (router + middleware)
+/api/                               @TheLuisBolivar
+
+# ───── Frontend (React + Vite) ─────
+/admin/                             @TheLuisBolivar
+
+# ───── Datos: migraciones SQL ─────
+# Cambios destructivos requieren cuidado extra
+/migrations/                        @TheLuisBolivar
+
+# ───── Infra y despliegue ─────
+/Dockerfile                         @TheLuisBolivar
+/docker-compose.yml                 @TheLuisBolivar
+/Makefile                           @TheLuisBolivar
+/context/tech/terraform/            @TheLuisBolivar
+/context/tech/gcp-mvp-deployment.md @TheLuisBolivar
+
+# ───── Documentación y producto ─────
+/README.md                          @TheLuisBolivar
+/docs/                              @TheLuisBolivar
+/context/product/                   @TheLuisBolivar
+
+# ───── Seguridad / configuración crítica ─────
+/CODEOWNERS                         @TheLuisBolivar
+/.github/                           @TheLuisBolivar
