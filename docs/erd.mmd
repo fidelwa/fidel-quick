@@ -7,7 +7,7 @@ erDiagram
     }
 
     sisfi {
-        varchar id PK "earn_burn, cashback"
+        varchar id PK "earn_burn, cashback, pushcard"
         varchar name
         text description
         boolean active
@@ -51,6 +51,15 @@ erDiagram
         uuid id PK
         uuid customer_sisfi_id FK_UK
         decimal cashback_rate "DECIMAL(5,4) CHECK > 0 AND <= 1"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    pushcard_config {
+        uuid id PK
+        uuid customer_sisfi_id FK_UK
+        int card_slots "DEFAULT 10, CHECK > 0"
+        uuid reward_on_complete "nullable"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -217,6 +226,27 @@ erDiagram
     }
 
     %% ════════════════════════════════════════
+    %% SISTEMA: PUSHCARD (Tarjeta de sellos)
+    %% ════════════════════════════════════════
+
+    pushcard_cards {
+        uuid id PK
+        uuid customer_sisfi_id FK
+        uuid client_id FK
+        varchar status "open, completed, redeemed, cancelled"
+        timestamptz completed_at "nullable"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    pushcard_stamps {
+        uuid id PK
+        uuid card_id FK
+        uuid collaborator_id FK
+        timestamptz created_at "INDEX (collaborator_id, created_at DESC) — corrección 2h"
+    }
+
+    %% ════════════════════════════════════════
     %% RELACIONES
     %% ════════════════════════════════════════
 
@@ -234,6 +264,7 @@ erDiagram
     %% Config por sistema
     customer_sisfi ||--o| config_earnburn : "configura"
     customer_sisfi ||--o| config_cashback : "configura"
+    customer_sisfi ||--o| pushcard_config : "configura"
 
     %% Earnburn operacional
     customer_sisfi ||--o{ rewards_earnburn : "ofrece"
@@ -246,6 +277,12 @@ erDiagram
     customer_sisfi ||--o{ balances_cashback : "rastrea"
     customer_sisfi ||--o{ transactions_cashback : "registra"
     customer_sisfi ||--o{ redemptions_cashback : "gestiona"
+
+    %% Pushcard operacional
+    customer_sisfi ||--o{ pushcard_cards : "abre tarjetas"
+    pushcard_cards ||--o{ pushcard_stamps : "acumula sellos"
+    clients ||--o{ pushcard_cards : "posee"
+    collaborators ||--o{ pushcard_stamps : "suma"
 
     %% Collaborators → transacciones
     collaborators ||--o{ transactions_earnburn : "procesa"
