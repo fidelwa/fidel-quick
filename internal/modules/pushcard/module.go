@@ -86,7 +86,8 @@ func (m *Module) handleCheckCard(ctx context.Context, cmd loyalty.Command) (*loy
 	return &loyalty.CommandResult{Message: msg}, nil
 }
 
-// handleRedeem is a placeholder until the full redemption flow lands in FID-4.
+// handleRedeem generates a redemption code for a completed card. The
+// collaborator confirms by entering this code (handled in pc_confirm_redemption).
 func (m *Module) handleRedeem(ctx context.Context, cmd loyalty.Command) (*loyalty.CommandResult, error) {
 	cfg, err := m.service.GetConfig(ctx, cmd.UserContext.CustomerID)
 	if err != nil {
@@ -96,13 +97,24 @@ func (m *Module) handleRedeem(ctx context.Context, cmd loyalty.Command) (*loyalt
 	if err != nil {
 		return nil, err
 	}
+	// Open card not yet complete — still progressing.
 	if progress.HasOpenCard && progress.StampsCount < progress.CardSlots {
-		msg := fmt.Sprintf("Aún no completás la tarjeta. Te faltan %d sellos.", progress.CardSlots-progress.StampsCount)
+		msg := fmt.Sprintf("Aún no completás la tarjeta de *%s*.\n%s\nTe faltan %d sellos.",
+			cfg.Name, progress.Visual, progress.CardSlots-progress.StampsCount)
 		return &loyalty.CommandResult{Message: msg}, nil
 	}
-	return &loyalty.CommandResult{
-		Message: "Mostrale al colaborador esta pantalla. (Flujo completo de canje llega en FID-4.)",
-	}, nil
+
+	// Either there's a completed card waiting or no card at all.
+	rewardName := cfg.Name
+	code, err := m.service.RequestRedemption(ctx,
+		cfg.CustomerSisfiID, cmd.UserContext.UserID, cmd.UserContext.CustomerID, rewardName)
+	if err != nil {
+		return &loyalty.CommandResult{Message: err.Error()}, nil
+	}
+
+	msg := fmt.Sprintf("¡Felicitaciones! Tu tarjeta está completa.\n\nTu código de canje: *%s*\nVálido por 1 hora. Mostrale el código al colaborador para canjear *%s*.",
+		code, rewardName)
+	return &loyalty.CommandResult{Message: msg}, nil
 }
 
 // handleAddStamp is a stub that uses the collaborator + provided client phone.

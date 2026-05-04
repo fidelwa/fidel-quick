@@ -186,8 +186,49 @@ func (f *fakeRepo) ListCardsByCustomer(_ context.Context, customerSisfiID, statu
 
 func newTestService() (*Service, *fakeRepo) {
 	repo := newFakeRepo()
-	svc := NewService(repo, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := NewService(repo, &fakeCache{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return svc, repo
+}
+
+// fakeCache stores redemption codes in memory for service tests.
+type fakeCache struct {
+	mu sync.Mutex
+	m  map[string]*RedemptionCode
+}
+
+func (c *fakeCache) ensure() {
+	if c.m == nil {
+		c.m = make(map[string]*RedemptionCode)
+	}
+}
+
+func (c *fakeCache) SetRedemption(_ context.Context, code string, data *RedemptionCode) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ensure()
+	c.m[code] = data
+	return nil
+}
+
+func (c *fakeCache) GetRedemption(_ context.Context, code string) (*RedemptionCode, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.m[code], nil
+}
+
+func (c *fakeCache) ConsumeRedemption(_ context.Context, code string) (*RedemptionCode, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	d := c.m[code]
+	delete(c.m, code)
+	return d, nil
+}
+
+func (c *fakeCache) DeleteRedemption(_ context.Context, code string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.m, code)
+	return nil
 }
 
 func TestAddStamp_OpensCardWhenNoneExists(t *testing.T) {
@@ -323,5 +364,66 @@ func TestBuildVisual(t *testing.T) {
 		if got != c.want {
 			t.Errorf("buildVisual(%d,%d) = %q, want %q", c.count, c.slots, got, c.want)
 		}
+	}
+}
+
+func TestRequestRedemption_RequiresCompletedCard(t *testing.T) {
+	svc, repo := newTestService()
+	repo.seedConfig("cs-1", 3)
+	ctx := context.Background()
+
+	// No completed card → error
+	if _, err := svc.RequestRedemption(ctx, "cs-1", "client-1", "cust-1", "Café gratis"); err == nil {
+		t.Fatalf("expected error when no completed card")
+	}
+}
+
+func TestRequestRedemption_WithCompletedCardReturnsCode(t *testing.T) {
+	svc, repo := newTestService()
+	repo.seedConfig("cs-1", 2)
+	ctx := context.Background()
+
+	// Complete a card
+	for i := 0; i < 2; i++ {
+		if _, err := svc.AddStamp(ctx, AddStampReq{CustomerSisfiID: "cs-1", ClientID: "c", CollaboratorID: "k"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, err := svc.RequestRedemption(ctx, "cs-1", "c", "cust-1", "Café")
+	if err != nil {
+		t.Fatalf("request redemption: %v", err)
+	}
+	if len(code) != 6 {
+		t.Fatalf("want 6-char code, got %d (%q)", len(code), code)
+	}
+}
+
+func TestConfirmRedemption_MarksRedeemed(t *testing.T) {
+	svc, repo := newTestService()
+	repo.seedConfig("cs-1", 2)
+	ctx := context.Background()
+
+	for i := 0; i < 2; i++ {
+		_, _ = svc.AddStamp(ctx, AddStampReq{CustomerSisfiID: "cs-1", ClientID: "c", CollaboratorID: "k"})
+	}
+	code, _ := svc.RequestRedemption(ctx, "cs-1", "c", "cust-1", "Café")
+
+	data, err := svc.ConfirmRedemption(ctx, code, "k")
+	if err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	if data.RewardName != "Café" {
+		t.Fatalf("want Café, got %s", data.RewardName)
+	}
+
+	// Card should be redeemed now
+	card, _ := repo.GetCard(ctx, data.CardID)
+	if card.Status != StatusRedeemed {
+		t.Fatalf("want redeemed, got %s", card.Status)
+	}
+
+	// Code should not be reusable
+	if _, err := svc.ConfirmRedemption(ctx, code, "k"); err == nil {
+		t.Fatalf("code should not be reusable")
 	}
 }
