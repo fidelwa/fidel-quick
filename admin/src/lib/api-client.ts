@@ -12,6 +12,8 @@ import type {
   Transaction,
   CashbackTransaction,
   Balance,
+  PushcardConfig,
+  PushcardCard,
   AuthResponse,
   OnboardingRegisterRequest,
   GoogleOnboardingRequest,
@@ -221,3 +223,27 @@ export const completeOnboarding = () =>
     method: "POST",
   })
 
+
+// Pushcard
+export const getPushcardConfig = (customerId: string) =>
+  request<PushcardConfig>(`/pushcard/config?customer_id=${customerId}`)
+
+export const upsertPushcardConfig = (
+  customerSisfiID: string,
+  data: { card_slots: number; reward_on_complete?: string }
+) =>
+  request<PushcardConfig>(`/pushcard/programs/${customerSisfiID}/config`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  })
+
+export const getPushcardCards = (
+  customerSisfiID: string,
+  status?: "open" | "completed" | "redeemed" | "cancelled",
+  limit = 50
+) => {
+  const qs = new URLSearchParams()
+  if (status) qs.set("status", status)
+  qs.set("limit", String(limit))
+  return request<PushcardCard[]>(`/pushcard/programs/${customerSisfiID}/cards?${qs.toString()}`)
+}

@@ -11,6 +11,7 @@ import { ProgramsListPage } from "@/pages/programs/programs-list"
 import { ProgramDetailPage } from "@/pages/programs/program-detail"
 import { CashbackListPage } from "@/pages/cashback/cashback-list"
 import { CashbackDetailPage } from "@/pages/cashback/cashback-detail"
+import { PushcardPage } from "@/pages/pushcard/pushcard-page"
 import { CollaboratorsListPage } from "@/pages/collaborators/collaborators-list"
 import { ClientLookupPage } from "@/pages/clients/client-lookup"
 import { FeedbackListPage } from "@/pages/feedback/feedback-list"
@@ -50,6 +51,7 @@ function App() {
               <Route path="programas/:id" element={<ProgramDetailPage />} />
               <Route path="cashback" element={<CashbackListPage />} />
               <Route path="cashback/:id" element={<CashbackDetailPage />} />
+              <Route path="pushcard" element={<PushcardPage />} />
               <Route path="colaboradores" element={<CollaboratorsListPage />} />
               <Route path="clientes" element={<ClientLookupPage />} />
               <Route path="feedback" element={<FeedbackListPage />} />
