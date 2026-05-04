@@ -231,6 +231,7 @@ type Registry struct {
 
 func (r *Registry) Register(m Module) { ... }
 func (r *Registry) AllMenus(role string) []MenuDefinition { ... }
+func (r *Registry) FilteredMenus(role string, activeModules []string) []MenuDefinition { ... } // filters by active modules; fallback to AllMenus if empty
 func (r *Registry) Dispatch(ctx context.Context, cmd Command) (*CommandResult, error) { ... }
 func (r *Registry) RegisterAllRoutes(rg *gin.RouterGroup) { ... }
 ```
@@ -791,7 +792,9 @@ func BearerAuth(token string) gin.HandlerFunc {
 
 The system presents WhatsApp interactive lists (native UI) based on the user's role. No natural language interpretation — the user selects from predefined options.
 
-**Client menu (5 opciones):**
+**Filtrado por modulos activos:** El menu solo muestra opciones de modulos que tienen programas activos para el negocio (`FilteredMenus`). Si un negocio solo tiene cashback, no ve opciones de puntos y viceversa. Si tiene ambos, ve las opciones combinadas. Al final siempre se agrega "Usar otro establecimiento".
+
+**Client menu (earn-burn, ejemplo):**
 ```
 Menu principal — {business_name}:
 1. Consultar puntos
@@ -799,9 +802,10 @@ Menu principal — {business_name}:
 3. Canjear recompensa (lista interactiva filtrada por balance)
 4. Cargar puntos
 5. Dejar feedback
+6. Usar otro establecimiento  ← siempre presente
 ```
 
-**Collaborator menu:**
+**Collaborator menu (earn-burn, ejemplo):**
 ```
 Menu principal — {business_name}:
 1. Agregar puntos
@@ -809,6 +813,7 @@ Menu principal — {business_name}:
 3. Confirmar canje
 4. Corregir transaccion
 5. Procesar carga de puntos
+6. Usar otro establecimiento  ← siempre presente
 ```
 
 ### Flow Lifecycle (replaces tool_use loop)
@@ -831,7 +836,7 @@ Sessions manage business context resolution. Flow state manages step-by-step int
 
 | Key | Value | TTL |
 |-----|-------|-----|
-| `session:{phone}` | `{customer_id, role, user_id, business_name}` | 30min (reset on each message) |
+| `session:{phone}` | `{customer_id, role, user_id, business_name, active_modules}` | 30min (reset on each message) |
 | `session:select:{phone}` | `[{customer_id, name}, ...]` pending selection | 5min |
 | `flow:{phone}:{customer_id}` | `{current_flow, current_step, collected_data, started_at}` | 30min (reset on each interaction) |
 
@@ -842,7 +847,9 @@ Sessions manage business context resolution. Flow state manages step-by-step int
 4. If found in 1 business → auto-set session
 5. If found in multiple businesses → store options in `session:select:{phone}`, present interactive selection list
 6. If not found → "Escanea el QR del establecimiento"
-7. "Cambiar negocio" menu option → delete `session:{phone}` + `flow:{phone}:*`, re-present resolution
+7. Al crear sesion nueva: consultar `GetActiveProgramTypes(customerID)` → almacenar como `active_modules` en la sesion
+8. Si sesion existente tiene `active_modules` vacio → backfill automatico consultando DB y re-guardando sesion
+9. "Usar otro establecimiento" (`cambiar_negocio`) → delete `session:{phone}` + `flow:{phone}:*`, re-present resolution
 
 ### Edge Cases
 
@@ -854,7 +861,9 @@ Sessions manage business context resolution. Flow state manages step-by-step int
 | Foto con sesion pero sin flujo activo | Responder: "Para que necesitas enviar esta foto? Selecciona una opcion del menu" |
 | Foto dentro de flujo en paso que espera foto | AI procesa la foto (OCR ticket) |
 | Texto pre-llenado del deeplink modificado | Landing page ya capturo customer_id en el deeplink; el texto es solo trigger |
-| Cambiar de negocio | Opcion en menu → limpia sesion + flow state |
+| Cambiar de negocio | "Usar otro establecimiento" (`cambiar_negocio`) interceptado en webhook ANTES del engine → borra sesion + flow state → re-resuelve negocio |
+| Sesion sin active_modules (legacy) | Backfill automatico: consulta DB, guarda en sesion, continua. Fallback en FilteredMenus → AllMenus si vacio |
+| Negocio con solo 1 programa activo | Menu solo muestra opciones de ese modulo + "Usar otro establecimiento" |
 
 ---
 
@@ -862,7 +871,7 @@ Sessions manage business context resolution. Flow state manages step-by-step int
 
 | Data | Redis | Postgres | TTL |
 |------|-------|----------|-----|
-| Session (business context) | `session:{phone}` → `{customer_id, role, user_id, business_name}` | — | 30min |
+| Session (business context) | `session:{phone}` → `{customer_id, role, user_id, business_name, active_modules}` | — | 30min |
 | Session selection | `session:select:{phone}` → options[] | — | 5min |
 | OTP identity | `otp:{code}` → `{client_id, customer_id, type: "identity", metadata: {}}` | — | 15min |
 | OTP redemption | `otp:{code}` → `{client_id, customer_id, type: "redemption", metadata: {reward_id, points_spent}}` | `redemptions.expires_at` | 1h |

@@ -4,11 +4,27 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
 )
+
+// cmdLogAttrs returns slog attributes for a failed command, including full user
+// context and the collected flow data so that every error log is self-contained.
+func cmdLogAttrs(commandID string, user loyalty.UserContext, data map[string]string, err error) []any {
+	attrs := []any{
+		"command", commandID,
+		"error", err,
+		"user_id", user.UserID,
+		"role", user.Role,
+		"phone", user.Phone,
+		"customer_id", user.CustomerID,
+	}
+	if len(data) > 0 {
+		attrs = append(attrs, "data", data)
+	}
+	return attrs
+}
 
 // MessageSender is the interface for sending WhatsApp messages.
 // Satisfied by the WhatsApp client (Phase 6).
@@ -24,20 +40,42 @@ type ListOption struct {
 	Description string
 }
 
-// Engine manages step-by-step flows and menu presentation.
-type Engine struct {
-	registry *loyalty.Registry
-	store    *StateStore
-	sender   MessageSender
-	log      *slog.Logger
+// PhotoProcessor handles invoice photo analysis and storage.
+// When nil, photos are stored as raw URLs (backward compat).
+type PhotoProcessor interface {
+	ProcessPhoto(ctx context.Context, imageURL string) (*PhotoProcessResult, error)
 }
 
-func NewEngine(registry *loyalty.Registry, store *StateStore, sender MessageSender, log *slog.Logger) *Engine {
+// PhotoProcessResult from processing an invoice photo.
+type PhotoProcessResult struct {
+	StorageURL string
+	Amount     float64
+	Currency   string
+}
+
+// FlowStore persists flow state. Satisfied by *StateStore (Redis).
+type FlowStore interface {
+	Get(ctx context.Context, phone, customerID string) (*State, error)
+	Set(ctx context.Context, phone, customerID string, fs *State) error
+	Delete(ctx context.Context, phone, customerID string) error
+}
+
+// Engine manages step-by-step flows and menu presentation.
+type Engine struct {
+	registry       *loyalty.Registry
+	store          FlowStore
+	sender         MessageSender
+	photoProcessor PhotoProcessor
+	log            *slog.Logger
+}
+
+func NewEngine(registry *loyalty.Registry, store FlowStore, sender MessageSender, photoProcessor PhotoProcessor, log *slog.Logger) *Engine {
 	return &Engine{
-		registry: registry,
-		store:    store,
-		sender:   sender,
-		log:      log,
+		registry:       registry,
+		store:          store,
+		sender:         sender,
+		photoProcessor: photoProcessor,
+		log:            log,
 	}
 }
 
@@ -80,7 +118,18 @@ func (e *Engine) processStep(ctx context.Context, user loyalty.UserContext, fs *
 		if imageURL == "" {
 			return e.sender.SendText(ctx, user.Phone, "Envia una foto para continuar.")
 		}
-		actualInput = imageURL
+		if e.photoProcessor != nil {
+			result, err := e.photoProcessor.ProcessPhoto(ctx, imageURL)
+			if err != nil {
+				e.log.Error("photo processing failed", "error", err)
+				return e.sender.SendText(ctx, user.Phone, "Error al procesar la foto. Intenta de nuevo.")
+			}
+			actualInput = result.StorageURL
+			fs.CollectedData["amount"] = fmt.Sprintf("%.2f", result.Amount)
+			fs.CollectedData["currency"] = result.Currency
+		} else {
+			actualInput = imageURL
+		}
 	}
 
 	// Validate
@@ -107,7 +156,7 @@ func (e *Engine) processStep(ctx context.Context, user loyalty.UserContext, fs *
 
 		result, err := e.registry.Dispatch(ctx, cmd)
 		if err != nil {
-			e.log.Error("command failed", "command", fs.CurrentFlow, "error", err)
+			e.log.Error("command failed", cmdLogAttrs(fs.CurrentFlow, user, fs.CollectedData, err)...)
 			return e.sender.SendText(ctx, user.Phone, "Ocurrio un error. Intenta de nuevo.")
 		}
 
@@ -125,18 +174,9 @@ func (e *Engine) processStep(ctx context.Context, user loyalty.UserContext, fs *
 
 // handleMenuSelection starts a new flow or executes a direct command.
 func (e *Engine) handleMenuSelection(ctx context.Context, user loyalty.UserContext, commandID string) error {
-	// Check for prefixed selections (e.g. "reward:{id}" from reward list)
-	if rewardID, ok := strings.CutPrefix(commandID, "reward:"); ok {
-		return e.startFlowWithData(ctx, user, "request_redemption", map[string]string{
-			"reward_id": rewardID,
-		})
-	}
-
-	// Check for benefit prefix (cashback module)
-	if benefitID, ok := strings.CutPrefix(commandID, "benefit:"); ok {
-		return e.startFlowWithData(ctx, user, "cb_request_redemption", map[string]string{
-			"reward_id": benefitID,
-		})
+	// Check for prefixed selections — delegated to modules via registry
+	if flowCmd, flowData := e.registry.ResolveSelection(commandID); flowCmd != "" {
+		return e.startFlowWithData(ctx, user, flowCmd, flowData)
 	}
 
 	// Check if this command has a flow
@@ -152,7 +192,7 @@ func (e *Engine) handleMenuSelection(ctx context.Context, user loyalty.UserConte
 
 		result, err := e.registry.Dispatch(ctx, cmd)
 		if err != nil {
-			e.log.Error("direct command failed", "command", commandID, "error", err)
+			e.log.Error("direct command failed", cmdLogAttrs(commandID, user, cmd.Data, err)...)
 			return e.sender.SendText(ctx, user.Phone, "Ocurrio un error. Intenta de nuevo.")
 		}
 
@@ -187,7 +227,7 @@ func (e *Engine) startFlowWithData(ctx context.Context, user loyalty.UserContext
 		}
 		result, err := e.registry.Dispatch(ctx, cmd)
 		if err != nil {
-			e.log.Error("command failed", "command", commandID, "error", err)
+			e.log.Error("command failed", cmdLogAttrs(commandID, user, data, err)...)
 			return e.sender.SendText(ctx, user.Phone, "Ocurrio un error. Intenta de nuevo.")
 		}
 		return e.sendResult(ctx, user, result)
@@ -212,7 +252,7 @@ func (e *Engine) startFlowWithData(ctx context.Context, user loyalty.UserContext
 		}
 		result, err := e.registry.Dispatch(ctx, cmd)
 		if err != nil {
-			e.log.Error("command failed", "command", commandID, "error", err)
+			e.log.Error("command failed", cmdLogAttrs(commandID, user, data, err)...)
 			return e.sender.SendText(ctx, user.Phone, "Ocurrio un error. Intenta de nuevo.")
 		}
 		return e.sendResult(ctx, user, result)
@@ -280,6 +320,21 @@ func (e *Engine) presentMainMenu(ctx context.Context, user loyalty.UserContext) 
 			ID:          m.ID,
 			Title:       m.Title,
 			Description: m.Description,
+		})
+	}
+
+	// Add role switch option if user has dual role
+	if user.CanSwitchRole {
+		label := "Usar como cliente"
+		desc := "Ver menu de cliente"
+		if user.Role == "client" {
+			label = "Modo colaborador"
+			desc = "Volver al menu de colaborador"
+		}
+		options = append(options, ListOption{
+			ID:          "cambiar_rol",
+			Title:       label,
+			Description: desc,
 		})
 	}
 

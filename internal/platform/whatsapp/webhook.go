@@ -122,13 +122,15 @@ func (h *WebhookHandler) processMessage(ctx context.Context, msg Message) {
 
 	// 2. No session — resolve business
 	if uc == nil {
+		h.log.Info("no session found, resolving context", "phone", phone)
 		uc, err = h.resolveContext(ctx, phone, msgText)
 		if err != nil {
-			h.log.Error("resolve context failed", "error", err)
+			h.log.Error("resolve context failed", "error", err, "phone", phone)
 			return
 		}
 		if uc == nil {
-			return // message already sent to user (multi-biz selection or not registered)
+			h.log.Info("resolve context returned nil (pending selection or not registered)", "phone", phone)
+			return
 		}
 		// Session just created — show main menu instead of forwarding the original message
 		msgType = "text"
@@ -156,6 +158,37 @@ func (h *WebhookHandler) processMessage(ctx context.Context, msg Message) {
 		return
 	}
 
+	// 3b. Intercept "cambiar_rol" — switch between collaborator/client
+	if msgType == "interactive" && msgText == "cambiar_rol" {
+		if uc.Role == "collaborator" {
+			// Switch to client
+			if uc.ClientID == "" {
+				h.repo.RegisterClient(ctx, uc.CustomerID, phone)
+				cid, _ := h.repo.FindClient(ctx, phone, uc.CustomerID)
+				uc.ClientID = cid
+			}
+			uc.Role = "client"
+			uc.UserID = uc.ClientID
+		} else if uc.Role == "client" && uc.CollaboratorID != "" {
+			// Switch back to collaborator
+			uc.Role = "collaborator"
+			uc.UserID = uc.CollaboratorID
+		}
+		h.session.SetSession(ctx, phone, uc)
+		h.engine.ResetFlow(ctx, phone, uc.CustomerID)
+		user := loyalty.UserContext{
+			CustomerID:    uc.CustomerID,
+			BusinessName:  uc.BusinessName,
+			Role:          uc.Role,
+			UserID:        uc.UserID,
+			Phone:         phone,
+			ActiveModules: uc.ActiveModules,
+			CanSwitchRole: uc.CollaboratorID != "" && uc.ClientID != "",
+		}
+		h.engine.HandleMessage(ctx, user, "text", "", "")
+		return
+	}
+
 	// 4. Build user context for flow engine
 	user := loyalty.UserContext{
 		CustomerID:    uc.CustomerID,
@@ -164,6 +197,7 @@ func (h *WebhookHandler) processMessage(ctx context.Context, msg Message) {
 		UserID:        uc.UserID,
 		Phone:         phone,
 		ActiveModules: uc.ActiveModules,
+		CanSwitchRole: uc.CollaboratorID != "" && uc.ClientID != "",
 	}
 
 	// 5. Resolve image URL if needed
@@ -192,6 +226,7 @@ func (h *WebhookHandler) resolveContext(ctx context.Context, phone, msgText stri
 		return nil, err
 	}
 	if pending != nil {
+		h.log.Info("pending business selection found", "phone", phone, "options", len(pending))
 		// User is responding to a business selection prompt
 		for _, opt := range pending {
 			if opt.CustomerID == msgText || opt.Name == msgText {
@@ -211,8 +246,7 @@ func (h *WebhookHandler) resolveContext(ctx context.Context, phone, msgText stri
 	}
 
 	if multi != nil {
-		// Multiple businesses — present selection
-		h.session.SetPendingSelection(ctx, phone, multi.Options)
+		h.log.Info("multiple businesses found, prompting selection", "phone", phone, "count", len(multi.Options))
 
 		var options []ListOption
 		for _, opt := range multi.Options {
@@ -221,12 +255,19 @@ func (h *WebhookHandler) resolveContext(ctx context.Context, phone, msgText stri
 				Title: opt.Name,
 			})
 		}
-		h.client.SendInteractiveList(ctx, phone, "Seleccionar negocio", "En cual negocio quieres operar?", options)
+		if err := h.client.SendInteractiveList(ctx, phone, "Seleccionar negocio", "En cual negocio quieres operar?", options); err != nil {
+			h.log.Error("failed to send business selection list", "error", err, "phone", phone)
+			// Don't store pending selection if the list wasn't delivered
+			return nil, nil
+		}
+		// Only persist after successful send
+		h.session.SetPendingSelection(ctx, phone, multi.Options)
 		return nil, nil
 	}
 
 	if biz == nil {
 		// Not registered
+		h.log.Info("user not registered in any business", "phone", phone)
 		if err := h.client.SendText(ctx, phone, "Hola! Aun no estas registrado.\nEscanea el codigo QR en el establecimiento para unirte al programa de fidelidad."); err != nil {
 			h.log.Error("failed to send not-registered message", "error", err, "phone", phone)
 		}
@@ -254,8 +295,22 @@ func (h *WebhookHandler) resolveAndCreateSession(ctx context.Context, phone, cus
 	}
 
 	if roleResult == nil {
+		h.log.Warn("role not resolved", "phone", phone, "customer", customerID)
 		h.client.SendText(ctx, phone, "No se pudo determinar tu rol. Contacta al negocio.")
 		return nil, nil
+	}
+
+	// Resolve both IDs for dual-role support
+	var collabID, clientID string
+	activeRole := roleResult.Role
+	activeUserID := roleResult.UserID
+
+	if roleResult.Role == "collaborator" {
+		collabID = roleResult.UserID
+		// Find client ID too (dual-role support)
+		clientID, _ = h.repo.FindClient(ctx, phone, customerID)
+	} else {
+		clientID = roleResult.UserID
 	}
 
 	modules, err := h.repo.GetActiveProgramTypes(ctx, customerID)
@@ -264,11 +319,13 @@ func (h *WebhookHandler) resolveAndCreateSession(ctx context.Context, phone, cus
 	}
 
 	uc := &session.UserContext{
-		CustomerID:    customerID,
-		Role:          roleResult.Role,
-		UserID:        roleResult.UserID,
-		BusinessName:  businessName,
-		ActiveModules: modules,
+		CustomerID:     customerID,
+		Role:           activeRole,
+		UserID:         activeUserID,
+		BusinessName:   businessName,
+		ActiveModules:  modules,
+		CollaboratorID: collabID,
+		ClientID:       clientID,
 	}
 
 	if err := h.session.SetSession(ctx, phone, uc); err != nil {

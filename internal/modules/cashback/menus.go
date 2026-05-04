@@ -10,8 +10,8 @@ import (
 func ClientMenus() []loyalty.MenuDefinition {
 	return []loyalty.MenuDefinition{
 		{ID: "cb_check_balance", Title: "Consultar saldo", Description: "Ver tu saldo y movimientos", Role: "client"},
-		{ID: "cb_list_rewards", Title: "Ver beneficios", Description: "Catalogo de beneficios disponibles", Role: "client"},
-		{ID: "cb_redeem", Title: "Canjear beneficio", Description: "Canjear tu cashback por un beneficio", Role: "client"},
+		{ID: "cb_list_rewards", Title: "Ver recompensas", Description: "Catalogo de recompensas disponibles", Role: "client"},
+		{ID: "cb_redeem", Title: "Canjear recompensa", Description: "Canjear tu saldo por una recompensa", Role: "client"},
 		{ID: "cb_load_request", Title: "Cargar cashback", Description: "Generar codigo para el colaborador", Role: "client"},
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
-	"github.com/theluisbolivar/fidel-quick/internal/modules/earnburn"
 )
 
 const (
@@ -22,19 +21,18 @@ const (
 )
 
 type Service struct {
-	repo          *PostgresRepository
-	cache         Cache
-	identityCache earnburn.Cache // shared identity OTP cache
-	log           *slog.Logger
+	repo  Repository
+	cache Cache
+	log   *slog.Logger
 }
 
-func NewService(repo *PostgresRepository, cache Cache, identityCache earnburn.Cache, log *slog.Logger) *Service {
-	return &Service{repo: repo, cache: cache, identityCache: identityCache, log: log}
+func NewService(repo Repository, cache Cache, log *slog.Logger) *Service {
+	return &Service{repo: repo, cache: cache, log: log}
 }
 
 // AddCashback calculates cashback from purchase amount and credits it.
 func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*CashbackTransaction, error) {
-	program, err := s.repo.GetProgram(ctx, req.ClientID)
+	program, err := s.repo.GetProgramByID(ctx, req.CustomerSisfiID)
 	if err != nil {
 		return nil, fmt.Errorf("get cashback program: %w", err)
 	}
@@ -48,7 +46,7 @@ func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*Cashbac
 	tx := &CashbackTransaction{
 		ID:               generateUUID(),
 		ClientID:         req.ClientID,
-		ProgramID:        req.ProgramID,
+		CustomerSisfiID:  req.CustomerSisfiID,
 		CollaboratorID:   req.CollaboratorID,
 		Type:             "earn",
 		Amount:           cashbackAmount,
@@ -77,13 +75,13 @@ func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*Cashbac
 }
 
 // CheckBalance returns the current cashback balance for a client.
-func (s *Service) CheckBalance(ctx context.Context, clientID, programID string) (float64, error) {
-	return s.repo.GetBalance(ctx, clientID, programID)
+func (s *Service) CheckBalance(ctx context.Context, clientID, customerSisfiID string) (float64, error) {
+	return s.repo.GetBalance(ctx, clientID, customerSisfiID)
 }
 
 // ListTransactions returns recent cashback transactions.
-func (s *Service) ListTransactions(ctx context.Context, clientID, programID string, limit int) ([]CashbackTransaction, error) {
-	return s.repo.ListTransactions(ctx, clientID, programID, limit)
+func (s *Service) ListTransactions(ctx context.Context, clientID, customerSisfiID string, limit int) ([]CashbackTransaction, error) {
+	return s.repo.ListTransactions(ctx, clientID, customerSisfiID, limit)
 }
 
 // ListCorrectableTransactions returns transactions within the 2h correction window.
@@ -103,7 +101,7 @@ func (s *Service) UpdateCashback(ctx context.Context, req UpdateCashbackReq) (*C
 	}
 
 	// Get program to recalculate cashback
-	program, err := s.repo.GetProgram(ctx, original.ClientID)
+	program, err := s.repo.GetProgramByID(ctx, original.CustomerSisfiID)
 	if err != nil {
 		return nil, fmt.Errorf("get program for correction: %w", err)
 	}
@@ -115,7 +113,7 @@ func (s *Service) UpdateCashback(ctx context.Context, req UpdateCashbackReq) (*C
 	tx := &CashbackTransaction{
 		ID:                    generateUUID(),
 		ClientID:              original.ClientID,
-		ProgramID:             original.ProgramID,
+		CustomerSisfiID:       original.CustomerSisfiID,
 		CollaboratorID:        req.CollaboratorID,
 		Type:                  "adjustment",
 		Amount:                delta,
@@ -142,8 +140,8 @@ func (s *Service) UpdateCashback(ctx context.Context, req UpdateCashbackReq) (*C
 }
 
 // ListRewards returns rewards the client can afford.
-func (s *Service) ListRewards(ctx context.Context, customerID, programID string, maxCost float64) ([]CashbackReward, error) {
-	return s.repo.ListRewards(ctx, customerID, programID, maxCost)
+func (s *Service) ListRewards(ctx context.Context, customerID, customerSisfiID string, maxCost float64) ([]CashbackReward, error) {
+	return s.repo.ListRewards(ctx, customerID, customerSisfiID, maxCost)
 }
 
 // RequestRedemption creates a pending redemption with a temporary code.
@@ -153,7 +151,7 @@ func (s *Service) RequestRedemption(ctx context.Context, req CashbackRedemptionR
 		return nil, "", fmt.Errorf("get reward: %w", err)
 	}
 
-	balance, err := s.repo.GetBalance(ctx, req.ClientID, req.ProgramID)
+	balance, err := s.repo.GetBalance(ctx, req.ClientID, req.CustomerSisfiID)
 	if err != nil {
 		return nil, "", fmt.Errorf("get balance: %w", err)
 	}
@@ -164,23 +162,23 @@ func (s *Service) RequestRedemption(ctx context.Context, req CashbackRedemptionR
 
 	code := generateCode(otpCodeLength)
 	rd := &CashbackRedemption{
-		ID:          generateUUID(),
-		ClientID:    req.ClientID,
-		RewardID:    req.RewardID,
-		ProgramID:   req.ProgramID,
-		Code:        code,
-		Status:      "pending",
-		AmountSpent: reward.Cost,
-		ExpiresAt:   time.Now().Add(redemptionExpiry),
+		ID:              generateUUID(),
+		ClientID:        req.ClientID,
+		RewardID:        req.RewardID,
+		CustomerSisfiID: req.CustomerSisfiID,
+		Code:            code,
+		Status:          "pending",
+		AmountSpent:     reward.Cost,
+		ExpiresAt:       time.Now().Add(redemptionExpiry),
 	}
 
 	tx := &CashbackTransaction{
-		ID:          generateUUID(),
-		ClientID:    req.ClientID,
-		ProgramID:   req.ProgramID,
-		Type:        "burn",
-		Amount:      -reward.Cost,
-		Description: fmt.Sprintf("Canje: %s", reward.Name),
+		ID:              generateUUID(),
+		ClientID:        req.ClientID,
+		CustomerSisfiID: req.CustomerSisfiID,
+		Type:            "burn",
+		Amount:          -reward.Cost,
+		Description:     fmt.Sprintf("Canje: %s", reward.Name),
 	}
 
 	if err := s.repo.BurnCashbackTx(ctx, tx, rd); err != nil {
@@ -216,17 +214,17 @@ func (s *Service) ConfirmRedemption(ctx context.Context, code, collaboratorID st
 	// Try Redis first (fast path)
 	otpData, err := s.cache.ConsumeOTP(ctx, code)
 	if err != nil {
-		s.log.Error("redis consume failed, falling back to postgres", "error", err)
+		s.log.Error("redis consume failed, falling back to postgres", "error", err, "code", code)
 	}
 
 	if otpData != nil && otpData.Type != "cb_redemption" {
-		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
+		return nil, fmt.Errorf("codigo invalido (tipo incorrecto) [code=%s, got_type=%s]", code, otpData.Type)
 	}
 
 	// Always confirm via Postgres (source of truth)
 	rd, err := s.repo.GetRedemptionByCode(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("codigo de canje no encontrado")
+		return nil, fmt.Errorf("codigo de canje no encontrado [code=%s]", code)
 	}
 
 	if rd.Status != "pending" {
@@ -252,72 +250,53 @@ func (s *Service) ConfirmRedemption(ctx context.Context, code, collaboratorID st
 	return rd, nil
 }
 
-// RequestLoadCode generates a temporary code for client→collaborator handoff.
+// RequestLoadCode generates a cashback identity code (multi-use, 15 min).
+// This single code is used by all collaborator flows.
 func (s *Service) RequestLoadCode(ctx context.Context, clientID, customerID string) (string, error) {
+	return s.RequestIdentityOTP(ctx, clientID, customerID)
+}
+
+// ValidateLoadCode checks a cashback identity code (multi-use, does not consume).
+func (s *Service) ValidateLoadCode(ctx context.Context, code string) (*OTPData, error) {
+	return s.ValidateIdentityOTP(ctx, code)
+}
+
+// RequestIdentityOTP generates a cashback-specific identity code for a client.
+func (s *Service) RequestIdentityOTP(ctx context.Context, clientID, customerID string) (string, error) {
+	// Invalidate previous OTP
+	oldCode, _ := s.cache.GetActiveIdentity(ctx, clientID)
+	if oldCode != "" {
+		s.cache.DeleteOTP(ctx, oldCode)
+		s.cache.DeleteActiveIdentity(ctx, clientID)
+	}
+
 	code := generateCode(otpCodeLength)
 	otpData := &OTPData{
 		ClientID:   clientID,
 		CustomerID: customerID,
-		Type:       "cb_load_points",
+		Type:       "cb_identity",
 		Metadata:   map[string]string{},
 	}
 	if err := s.cache.SetOTP(ctx, code, otpData); err != nil {
-		return "", fmt.Errorf("set cb load points otp: %w", err)
+		return "", fmt.Errorf("set cb identity otp: %w", err)
+	}
+	if err := s.cache.SetActiveIdentity(ctx, clientID, code); err != nil {
+		s.log.Error("failed to set cb active identity tracker", "error", err)
 	}
 	return code, nil
 }
 
-// ValidateLoadCode checks and consumes the load code.
-func (s *Service) ValidateLoadCode(ctx context.Context, code string) (*OTPData, error) {
-	data, err := s.cache.ConsumeOTP(ctx, code)
+// ValidateIdentityOTP checks a cashback identity OTP (multi-use, does not consume).
+func (s *Service) ValidateIdentityOTP(ctx context.Context, code string) (*OTPData, error) {
+	data, err := s.cache.GetOTP(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("consume load code: %w", err)
+		return nil, fmt.Errorf("get cb identity otp [code=%s]: %w", code, err)
 	}
 	if data == nil {
-		return nil, fmt.Errorf("codigo invalido o expirado")
+		return nil, fmt.Errorf("codigo invalido o expirado [code=%s]", code)
 	}
-	if data.Type != "cb_load_points" {
-		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
-	}
-	return data, nil
-}
-
-// RequestIdentityOTP delegates to the shared earnburn identity cache.
-func (s *Service) RequestIdentityOTP(ctx context.Context, clientID, customerID string) (string, error) {
-	// Invalidate previous OTP
-	oldCode, _ := s.identityCache.GetActiveIdentity(ctx, clientID)
-	if oldCode != "" {
-		s.identityCache.DeleteOTP(ctx, oldCode)
-		s.identityCache.DeleteActiveIdentity(ctx, clientID)
-	}
-
-	code := generateCode(otpCodeLength)
-	otpData := &earnburn.OTPData{
-		ClientID:   clientID,
-		CustomerID: customerID,
-		Type:       "identity",
-		Metadata:   map[string]string{},
-	}
-	if err := s.identityCache.SetOTP(ctx, code, otpData); err != nil {
-		return "", fmt.Errorf("set identity otp: %w", err)
-	}
-	if err := s.identityCache.SetActiveIdentity(ctx, clientID, code); err != nil {
-		s.log.Error("failed to set active identity tracker", "error", err)
-	}
-	return code, nil
-}
-
-// ValidateIdentityOTP checks an identity OTP (multi-use, does not consume).
-func (s *Service) ValidateIdentityOTP(ctx context.Context, code string) (*earnburn.OTPData, error) {
-	data, err := s.identityCache.GetOTP(ctx, code)
-	if err != nil {
-		return nil, fmt.Errorf("get identity otp: %w", err)
-	}
-	if data == nil {
-		return nil, fmt.Errorf("codigo invalido o expirado")
-	}
-	if data.Type != "identity" {
-		return nil, fmt.Errorf("codigo invalido (tipo incorrecto)")
+	if data.Type != "cb_identity" {
+		return nil, fmt.Errorf("codigo invalido (tipo incorrecto) [code=%s, got_type=%s]", code, data.Type)
 	}
 	return data, nil
 }
@@ -325,6 +304,10 @@ func (s *Service) ValidateIdentityOTP(ctx context.Context, code string) (*earnbu
 // GetClientName returns the client's name.
 func (s *Service) GetClientName(ctx context.Context, clientID string) (string, error) {
 	return s.repo.GetClientName(ctx, clientID)
+}
+
+func (s *Service) GetClientPhone(ctx context.Context, clientID string) (string, error) {
+	return s.repo.GetClientPhone(ctx, clientID)
 }
 
 // SubmitFeedback stores client feedback.
@@ -349,64 +332,50 @@ func (s *Service) GetReward(ctx context.Context, id string) (*CashbackReward, er
 	r, err := s.repo.GetReward(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, apperror.NotFound("beneficio no encontrado", err)
+			return nil, apperror.NotFound("recompensa no encontrada", err)
 		}
-		return nil, apperror.Internal("error al buscar beneficio", err)
+		return nil, apperror.Internal("error al buscar recompensa", err)
 	}
 	return r, nil
 }
 
 // --- Admin CRUD ---
 
-func (s *Service) ListPrograms(ctx context.Context) ([]CashbackProgram, error) {
-	programs, err := s.repo.ListPrograms(ctx)
+func (s *Service) ListPrograms(ctx context.Context, customerID string) ([]CashbackProgram, error) {
+	programs, err := s.repo.ListPrograms(ctx, customerID)
 	if err != nil {
 		return nil, apperror.Internal("error al listar programas cashback", err)
 	}
 	return programs, nil
 }
 
-func (s *Service) CreateProgram(ctx context.Context, p *CashbackProgram) error {
-	if err := s.repo.CreateProgram(ctx, p); err != nil {
-		return apperror.Internal("error al crear programa cashback", err)
-	}
-	return nil
-}
-
-func (s *Service) UpdateProgram(ctx context.Context, p *CashbackProgram) error {
-	if err := s.repo.UpdateProgram(ctx, p); err != nil {
-		return apperror.Internal("error al actualizar programa cashback", err)
-	}
-	return nil
-}
-
-func (s *Service) ListAllRewards(ctx context.Context, programID string) ([]CashbackReward, error) {
-	rewards, err := s.repo.ListAllRewards(ctx, programID)
+func (s *Service) ListAllRewards(ctx context.Context, customerSisfiID string) ([]CashbackReward, error) {
+	rewards, err := s.repo.ListAllRewards(ctx, customerSisfiID)
 	if err != nil {
-		return nil, apperror.Internal("error al listar beneficios", err)
+		return nil, apperror.Internal("error al listar recompensas", err)
 	}
 	return rewards, nil
 }
 
-func (s *Service) CreateRewardAdmin(ctx context.Context, programID string, r *CashbackReward) error {
-	if err := s.repo.CreateRewardAdmin(ctx, programID, r); err != nil {
+func (s *Service) CreateRewardAdmin(ctx context.Context, customerSisfiID string, r *CashbackReward) error {
+	if err := s.repo.CreateRewardAdmin(ctx, customerSisfiID, r); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return apperror.NotFound("programa cashback no encontrado", err)
 		}
-		return apperror.Internal("error al crear beneficio", err)
+		return apperror.Internal("error al crear recompensa", err)
 	}
 	return nil
 }
 
 func (s *Service) UpdateRewardAdmin(ctx context.Context, r *CashbackReward) error {
 	if err := s.repo.UpdateRewardAdmin(ctx, r); err != nil {
-		return apperror.Internal("error al actualizar beneficio", err)
+		return apperror.Internal("error al actualizar recompensa", err)
 	}
 	return nil
 }
 
-func (s *Service) GetBalance(ctx context.Context, clientID, programID string) (float64, error) {
-	return s.repo.GetBalance(ctx, clientID, programID)
+func (s *Service) GetBalance(ctx context.Context, clientID, customerSisfiID string) (float64, error) {
+	return s.repo.GetBalance(ctx, clientID, customerSisfiID)
 }
 
 // generateCode creates a random alphanumeric code.

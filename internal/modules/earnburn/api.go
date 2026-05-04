@@ -1,6 +1,8 @@
 package earnburn
 
 import (
+	"crypto/rand"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -21,8 +23,6 @@ func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	programs := rg.Group("/programs")
 	{
 		programs.GET("", h.listPrograms)
-		programs.POST("", h.createProgram)
-		programs.PUT("/:id", h.updateProgram)
 		programs.POST("/:id/rewards", h.createReward)
 		programs.GET("/:id/rewards", h.listRewards)
 		programs.PUT("/:id/rewards/:reward_id", h.updateReward)
@@ -37,6 +37,7 @@ func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		customers.PUT("/:id", h.updateCustomer)
 		customers.POST("/:id/collaborators", h.createCollaborator)
 		customers.GET("/:id/collaborators", h.listCollaborators)
+		customers.GET("/:id/clients", h.listClients)
 		customers.GET("/:id/feedback", h.listFeedback)
 	}
 }
@@ -44,7 +45,8 @@ func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 // --- Program endpoints ---
 
 func (h *APIHandler) listPrograms(c *gin.Context) {
-	programs, err := h.service.ListPrograms(c.Request.Context())
+	customerID := c.Query("customer_id")
+	programs, err := h.service.ListPrograms(c.Request.Context(), customerID)
 	if err != nil {
 		c.Error(err)
 		return
@@ -52,63 +54,10 @@ func (h *APIHandler) listPrograms(c *gin.Context) {
 	c.JSON(http.StatusOK, programs)
 }
 
-func (h *APIHandler) createProgram(c *gin.Context) {
-	var req struct {
-		CustomerID  string `json:"customer_id" binding:"required"`
-		Type        string `json:"type" binding:"required"`
-		Name        string `json:"name" binding:"required"`
-		PointsRatio int    `json:"points_ratio"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.BadRequest("datos invalidos", err))
-		return
-	}
-
-	p := &Program{
-		CustomerID:  req.CustomerID,
-		Type:        req.Type,
-		Name:        req.Name,
-		PointsRatio: req.PointsRatio,
-	}
-	if err := h.service.CreateProgram(c.Request.Context(), p); err != nil {
-		c.Error(err)
-		return
-	}
-	c.JSON(http.StatusCreated, gin.H{"id": p.ID})
-}
-
-func (h *APIHandler) updateProgram(c *gin.Context) {
-	var req struct {
-		Name        string `json:"name"`
-		PointsRatio int    `json:"points_ratio"`
-		Active      *bool  `json:"active"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.BadRequest("datos invalidos", err))
-		return
-	}
-
-	active := true
-	if req.Active != nil {
-		active = *req.Active
-	}
-	p := &Program{
-		ID:          c.Param("id"),
-		Name:        req.Name,
-		PointsRatio: req.PointsRatio,
-		Active:      active,
-	}
-	if err := h.service.UpdateProgram(c.Request.Context(), p); err != nil {
-		c.Error(err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"status": "updated"})
-}
-
 // --- Reward endpoints ---
 
 func (h *APIHandler) createReward(c *gin.Context) {
-	programID := c.Param("id")
+	customerSisfiID := c.Param("id")
 	var req struct {
 		Name        string `json:"name" binding:"required"`
 		Description string `json:"description"`
@@ -124,16 +73,18 @@ func (h *APIHandler) createReward(c *gin.Context) {
 		Description: req.Description,
 		PointsCost:  req.PointsCost,
 	}
-	if err := h.service.CreateRewardAdmin(c.Request.Context(), programID, rw); err != nil {
+	if err := h.service.CreateRewardAdmin(c.Request.Context(), customerSisfiID, rw); err != nil {
 		c.Error(err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"id": rw.ID})
+	rw.CustomerSisfiID = customerSisfiID
+	rw.Active = true
+	c.JSON(http.StatusCreated, rw)
 }
 
 func (h *APIHandler) listRewards(c *gin.Context) {
-	programID := c.Param("id")
-	rewards, err := h.service.ListAllRewards(c.Request.Context(), programID)
+	customerSisfiID := c.Param("id")
+	rewards, err := h.service.ListAllRewards(c.Request.Context(), customerSisfiID)
 	if err != nil {
 		c.Error(err)
 		return
@@ -174,22 +125,22 @@ func (h *APIHandler) updateReward(c *gin.Context) {
 // --- Client balance/transactions ---
 
 func (h *APIHandler) getClientBalance(c *gin.Context) {
-	programID := c.Param("id")
+	customerSisfiID := c.Param("id")
 	clientID := c.Param("client_id")
 
-	balance, err := h.service.GetBalance(c.Request.Context(), clientID, programID)
+	balance, err := h.service.GetBalance(c.Request.Context(), clientID, customerSisfiID)
 	if err != nil {
 		c.Error(err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"client_id": clientID, "program_id": programID, "balance": balance})
+	c.JSON(http.StatusOK, gin.H{"client_id": clientID, "customer_sisfi_id": customerSisfiID, "balance": balance})
 }
 
 func (h *APIHandler) getClientTransactions(c *gin.Context) {
-	programID := c.Param("id")
+	customerSisfiID := c.Param("id")
 	clientID := c.Param("client_id")
 
-	txs, err := h.service.ListTransactions(c.Request.Context(), clientID, programID, 50)
+	txs, err := h.service.ListTransactions(c.Request.Context(), clientID, customerSisfiID, 50)
 	if err != nil {
 		c.Error(err)
 		return
@@ -290,11 +241,17 @@ func (h *APIHandler) createCollaborator(c *gin.Context) {
 	var req struct {
 		Name   string `json:"name" binding:"required"`
 		Phone  string `json:"phone" binding:"required"`
-		HashID string `json:"hash_id" binding:"required"`
+		HashID string `json:"hash_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.BadRequest("datos invalidos", err))
 		return
+	}
+
+	if req.HashID == "" {
+		buf := make([]byte, 6)
+		rand.Read(buf)
+		req.HashID = fmt.Sprintf("%x", buf)
 	}
 
 	collab := &Collaborator{
@@ -319,6 +276,17 @@ func (h *APIHandler) listCollaborators(c *gin.Context) {
 	c.JSON(http.StatusOK, collabs)
 }
 
+// --- Clients ---
+
+func (h *APIHandler) listClients(c *gin.Context) {
+	clients, err := h.service.ListClients(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, clients)
+}
+
 // --- Feedback ---
 
 func (h *APIHandler) listFeedback(c *gin.Context) {
@@ -329,3 +297,4 @@ func (h *APIHandler) listFeedback(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, entries)
 }
+

@@ -10,16 +10,18 @@ import (
 )
 
 type Repository interface {
-	GetProgram(ctx context.Context, customerID string) (*Program, error)
-	GetBalance(ctx context.Context, clientID, programID string) (int, error)
-	UpsertBalance(ctx context.Context, clientID, programID string, delta int) (int, error)
+	GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error)
+	GetProgramByID(ctx context.Context, customerSisfiID string) (*EarnBurnProgram, error)
+	ListPrograms(ctx context.Context, customerID string) ([]EarnBurnProgram, error)
+	GetBalance(ctx context.Context, clientID, customerSisfiID string) (int, error)
+	UpsertBalance(ctx context.Context, clientID, customerSisfiID string, delta int) (int, error)
 	CreateTransaction(ctx context.Context, tx *Transaction) error
 	GetTransaction(ctx context.Context, id string) (*Transaction, error)
-	ListTransactions(ctx context.Context, clientID, programID string, limit int) ([]Transaction, error)
+	ListTransactions(ctx context.Context, clientID, customerSisfiID string, limit int) ([]Transaction, error)
 	ListCorrectableTransactions(ctx context.Context, clientID string) ([]Transaction, error)
 	GetClientName(ctx context.Context, clientID string) (string, error)
 
-	ListRewards(ctx context.Context, customerID, programID string, maxPoints int) ([]Reward, error)
+	ListRewards(ctx context.Context, customerID, customerSisfiID string, maxPoints int) ([]Reward, error)
 	GetReward(ctx context.Context, id string) (*Reward, error)
 	CreateReward(ctx context.Context, r *Reward) error
 	UpdateReward(ctx context.Context, r *Reward) error
@@ -32,19 +34,25 @@ type Repository interface {
 	CreateFeedback(ctx context.Context, clientID, customerID, message string) error
 
 	// Admin CRUD
-	ListPrograms(ctx context.Context) ([]Program, error)
-	CreateProgram(ctx context.Context, p *Program) error
-	UpdateProgram(ctx context.Context, p *Program) error
 	GetCustomer(ctx context.Context, id string) (*Customer, error)
 	CreateCustomer(ctx context.Context, c *Customer) error
 	UpdateCustomer(ctx context.Context, c *Customer) error
 	CreateCollaborator(ctx context.Context, c *Collaborator) error
 	ListCollaborators(ctx context.Context, customerID string) ([]Collaborator, error)
-	ListAllRewards(ctx context.Context, programID string) ([]Reward, error)
-	CreateRewardAdmin(ctx context.Context, programID string, r *Reward) error
+	ListAllRewards(ctx context.Context, customerSisfiID string) ([]Reward, error)
+	CreateRewardAdmin(ctx context.Context, customerSisfiID string, r *Reward) error
 	UpdateRewardAdmin(ctx context.Context, r *Reward) error
 	ListFeedback(ctx context.Context, customerID string) ([]FeedbackEntry, error)
+	ListClients(ctx context.Context, customerID string) ([]Client, error)
 	RegisterClient(ctx context.Context, customerID, phone string) error
+
+	GetClientPhone(ctx context.Context, clientID string) (string, error)
+
+	// Transactional
+	AddPointsTx(ctx context.Context, t *Transaction) (int, error)
+	BurnPointsTx(ctx context.Context, t *Transaction, rd *Redemption) error
+	AdjustPointsTx(ctx context.Context, t *Transaction) (int, error)
+	EnsureBalance(ctx context.Context, clientID, customerSisfiID string) error
 }
 
 // PostgresRepository implements Repository.
@@ -56,23 +64,39 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-func (r *PostgresRepository) GetProgram(ctx context.Context, customerID string) (*Program, error) {
-	var p Program
+func (r *PostgresRepository) GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error) {
+	var p EarnBurnProgram
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, customer_id, type, name, points_ratio, active
-		 FROM programs WHERE customer_id = $1 AND type = 'earn_burn' AND active = true`, customerID,
-	).Scan(&p.ID, &p.CustomerID, &p.Type, &p.Name, &p.PointsRatio, &p.Active)
+		`SELECT cs.id, cs.customer_id, cs.name, ec.points_ratio, cs.active
+		 FROM customer_sisfi cs
+		 JOIN config_earnburn ec ON ec.customer_sisfi_id = cs.id
+		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'earn_burn' AND cs.active = true`, customerID,
+	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.PointsRatio, &p.Active)
 	if err != nil {
 		return nil, fmt.Errorf("get program: %w", err)
 	}
 	return &p, nil
 }
 
-func (r *PostgresRepository) GetBalance(ctx context.Context, clientID, programID string) (int, error) {
+func (r *PostgresRepository) GetProgramByID(ctx context.Context, customerSisfiID string) (*EarnBurnProgram, error) {
+	var p EarnBurnProgram
+	err := r.db.QueryRowContext(ctx,
+		`SELECT cs.id, cs.customer_id, cs.name, ec.points_ratio, cs.active
+		 FROM customer_sisfi cs
+		 JOIN config_earnburn ec ON ec.customer_sisfi_id = cs.id
+		 WHERE cs.id = $1`, customerSisfiID,
+	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.PointsRatio, &p.Active)
+	if err != nil {
+		return nil, fmt.Errorf("get program by id: %w", err)
+	}
+	return &p, nil
+}
+
+func (r *PostgresRepository) GetBalance(ctx context.Context, clientID, customerSisfiID string) (int, error) {
 	var balance int
 	err := r.db.QueryRowContext(ctx,
-		`SELECT balance FROM points_balances WHERE client_id = $1 AND program_id = $2`,
-		clientID, programID,
+		`SELECT balance FROM balances_earnburn WHERE client_id = $1 AND customer_sisfi_id = $2`,
+		clientID, customerSisfiID,
 	).Scan(&balance)
 	if err == sql.ErrNoRows {
 		return 0, nil
@@ -83,15 +107,15 @@ func (r *PostgresRepository) GetBalance(ctx context.Context, clientID, programID
 	return balance, nil
 }
 
-func (r *PostgresRepository) UpsertBalance(ctx context.Context, clientID, programID string, delta int) (int, error) {
+func (r *PostgresRepository) UpsertBalance(ctx context.Context, clientID, customerSisfiID string, delta int) (int, error) {
 	var newBalance int
 	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO points_balances (client_id, program_id, balance)
+		INSERT INTO balances_earnburn (client_id, customer_sisfi_id, balance)
 		VALUES ($1, $2, GREATEST(0, $3))
-		ON CONFLICT (client_id, program_id) DO UPDATE
-		SET balance = GREATEST(0, points_balances.balance + $3), updated_at = NOW()
+		ON CONFLICT (client_id, customer_sisfi_id) DO UPDATE
+		SET balance = GREATEST(0, balances_earnburn.balance + $3), updated_at = NOW()
 		RETURNING balance
-	`, clientID, programID, delta).Scan(&newBalance)
+	`, clientID, customerSisfiID, delta).Scan(&newBalance)
 	if err != nil {
 		return 0, fmt.Errorf("upsert balance: %w", err)
 	}
@@ -100,10 +124,10 @@ func (r *PostgresRepository) UpsertBalance(ctx context.Context, clientID, progra
 
 func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *Transaction) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO points_transactions
-		(id, client_id, program_id, collaborator_id, type, amount, balance_after, invoice_url, description, manual_entry, correction_reason, correction_evidence_url, correctable_until)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, NULLIF($11, ''), NULLIF($12, ''), $13)
-	`, tx.ID, tx.ClientID, tx.ProgramID, tx.CollaboratorID, tx.Type, tx.Amount, tx.BalanceAfter,
+		INSERT INTO transactions_earnburn
+		(id, client_id, customer_sisfi_id, collaborator_id, type, amount, balance_after, invoice_url, description, manual_entry, correction_reason, correction_evidence_url, correctable_until)
+		VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, NULLIF($11, ''), NULLIF($12, ''), $13)
+	`, tx.ID, tx.ClientID, tx.CustomerSisfiID, tx.CollaboratorID, tx.Type, tx.Amount, tx.BalanceAfter,
 		tx.InvoiceURL, tx.Description, tx.ManualEntry, tx.CorrectionReason, tx.CorrectionEvidenceURL, tx.CorrectableUntil)
 	if err != nil {
 		return fmt.Errorf("create transaction: %w", err)
@@ -116,11 +140,11 @@ func (r *PostgresRepository) GetTransaction(ctx context.Context, id string) (*Tr
 	var collabID, invoiceURL, desc, corrReason, corrEvidence sql.NullString
 	var correctableUntil sql.NullTime
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, client_id, program_id, collaborator_id, type, amount, balance_after,
+		SELECT id, client_id, customer_sisfi_id, collaborator_id, type, amount, balance_after,
 		       invoice_url, description, manual_entry, correction_reason, correction_evidence_url,
 		       correctable_until, created_at
-		FROM points_transactions WHERE id = $1
-	`, id).Scan(&tx.ID, &tx.ClientID, &tx.ProgramID, &collabID, &tx.Type, &tx.Amount, &tx.BalanceAfter,
+		FROM transactions_earnburn WHERE id = $1
+	`, id).Scan(&tx.ID, &tx.ClientID, &tx.CustomerSisfiID, &collabID, &tx.Type, &tx.Amount, &tx.BalanceAfter,
 		&invoiceURL, &desc, &tx.ManualEntry, &corrReason, &corrEvidence, &correctableUntil, &tx.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get transaction: %w", err)
@@ -136,13 +160,13 @@ func (r *PostgresRepository) GetTransaction(ctx context.Context, id string) (*Tr
 	return &tx, nil
 }
 
-func (r *PostgresRepository) ListTransactions(ctx context.Context, clientID, programID string, limit int) ([]Transaction, error) {
+func (r *PostgresRepository) ListTransactions(ctx context.Context, clientID, customerSisfiID string, limit int) ([]Transaction, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, type, amount, balance_after, description, created_at
-		FROM points_transactions
-		WHERE client_id = $1 AND program_id = $2
+		FROM transactions_earnburn
+		WHERE client_id = $1 AND customer_sisfi_id = $2
 		ORDER BY created_at DESC LIMIT $3
-	`, clientID, programID, limit)
+	`, clientID, customerSisfiID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list transactions: %w", err)
 	}
@@ -164,7 +188,7 @@ func (r *PostgresRepository) ListTransactions(ctx context.Context, clientID, pro
 func (r *PostgresRepository) ListCorrectableTransactions(ctx context.Context, clientID string) ([]Transaction, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, type, amount, balance_after, created_at, correctable_until
-		FROM points_transactions
+		FROM transactions_earnburn
 		WHERE client_id = $1 AND correctable_until > NOW() AND type = 'earn'
 		ORDER BY created_at DESC
 	`, clientID)
@@ -199,13 +223,24 @@ func (r *PostgresRepository) GetClientName(ctx context.Context, clientID string)
 	return name.String, nil
 }
 
-func (r *PostgresRepository) ListRewards(ctx context.Context, customerID, programID string, maxPoints int) ([]Reward, error) {
+func (r *PostgresRepository) GetClientPhone(ctx context.Context, clientID string) (string, error) {
+	var phone string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT phone FROM clients WHERE id = $1`, clientID,
+	).Scan(&phone)
+	if err != nil {
+		return "", fmt.Errorf("get client phone: %w", err)
+	}
+	return phone, nil
+}
+
+func (r *PostgresRepository) ListRewards(ctx context.Context, customerID, customerSisfiID string, maxPoints int) ([]Reward, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, customer_id, program_id, name, COALESCE(description, ''), points_cost, active
-		FROM rewards
-		WHERE customer_id = $1 AND program_id = $2 AND active = true AND points_cost <= $3
+		SELECT id, customer_id, customer_sisfi_id, name, COALESCE(description, ''), points_cost, active
+		FROM rewards_earnburn
+		WHERE customer_id = $1 AND customer_sisfi_id = $2 AND active = true AND points_cost <= $3
 		ORDER BY points_cost ASC
-	`, customerID, programID, maxPoints)
+	`, customerID, customerSisfiID, maxPoints)
 	if err != nil {
 		return nil, fmt.Errorf("list rewards: %w", err)
 	}
@@ -214,7 +249,7 @@ func (r *PostgresRepository) ListRewards(ctx context.Context, customerID, progra
 	var rewards []Reward
 	for rows.Next() {
 		var rw Reward
-		if err := rows.Scan(&rw.ID, &rw.CustomerID, &rw.ProgramID, &rw.Name, &rw.Description, &rw.PointsCost, &rw.Active); err != nil {
+		if err := rows.Scan(&rw.ID, &rw.CustomerID, &rw.CustomerSisfiID, &rw.Name, &rw.Description, &rw.PointsCost, &rw.Active); err != nil {
 			return nil, fmt.Errorf("scan reward: %w", err)
 		}
 		rewards = append(rewards, rw)
@@ -226,8 +261,8 @@ func (r *PostgresRepository) GetReward(ctx context.Context, id string) (*Reward,
 	var rw Reward
 	var desc sql.NullString
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, customer_id, program_id, name, description, points_cost, active FROM rewards WHERE id = $1`, id,
-	).Scan(&rw.ID, &rw.CustomerID, &rw.ProgramID, &rw.Name, &desc, &rw.PointsCost, &rw.Active)
+		`SELECT id, customer_id, customer_sisfi_id, name, description, points_cost, active FROM rewards_earnburn WHERE id = $1`, id,
+	).Scan(&rw.ID, &rw.CustomerID, &rw.CustomerSisfiID, &rw.Name, &desc, &rw.PointsCost, &rw.Active)
 	if err != nil {
 		return nil, fmt.Errorf("get reward: %w", err)
 	}
@@ -237,15 +272,15 @@ func (r *PostgresRepository) GetReward(ctx context.Context, id string) (*Reward,
 
 func (r *PostgresRepository) CreateReward(ctx context.Context, rw *Reward) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO rewards (id, customer_id, program_id, name, description, points_cost, active)
+		INSERT INTO rewards_earnburn (id, customer_id, customer_sisfi_id, name, description, points_cost, active)
 		VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7)
-	`, rw.ID, rw.CustomerID, rw.ProgramID, rw.Name, rw.Description, rw.PointsCost, rw.Active)
+	`, rw.ID, rw.CustomerID, rw.CustomerSisfiID, rw.Name, rw.Description, rw.PointsCost, rw.Active)
 	return err
 }
 
 func (r *PostgresRepository) UpdateReward(ctx context.Context, rw *Reward) error {
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE rewards SET name = $2, description = NULLIF($3, ''), points_cost = $4, active = $5, updated_at = NOW()
+		UPDATE rewards_earnburn SET name = $2, description = NULLIF($3, ''), points_cost = $4, active = $5, updated_at = NOW()
 		WHERE id = $1
 	`, rw.ID, rw.Name, rw.Description, rw.PointsCost, rw.Active)
 	return err
@@ -253,9 +288,9 @@ func (r *PostgresRepository) UpdateReward(ctx context.Context, rw *Reward) error
 
 func (r *PostgresRepository) CreateRedemption(ctx context.Context, rd *Redemption) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO redemptions (id, client_id, reward_id, program_id, code, status, points_spent, expires_at)
+		INSERT INTO redemptions_earnburn (id, client_id, reward_id, customer_sisfi_id, code, status, points_spent, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, rd.ID, rd.ClientID, rd.RewardID, rd.ProgramID, rd.Code, rd.Status, rd.PointsSpent, rd.ExpiresAt)
+	`, rd.ID, rd.ClientID, rd.RewardID, rd.CustomerSisfiID, rd.Code, rd.Status, rd.PointsSpent, rd.ExpiresAt)
 	return err
 }
 
@@ -264,9 +299,9 @@ func (r *PostgresRepository) GetRedemptionByCode(ctx context.Context, code strin
 	var confirmedBy sql.NullString
 	var confirmedAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, client_id, reward_id, program_id, code, status, points_spent, confirmed_by, expires_at, confirmed_at, created_at
-		FROM redemptions WHERE code = $1
-	`, code).Scan(&rd.ID, &rd.ClientID, &rd.RewardID, &rd.ProgramID, &rd.Code, &rd.Status,
+		SELECT id, client_id, reward_id, customer_sisfi_id, code, status, points_spent, confirmed_by, expires_at, confirmed_at, created_at
+		FROM redemptions_earnburn WHERE code = $1
+	`, code).Scan(&rd.ID, &rd.ClientID, &rd.RewardID, &rd.CustomerSisfiID, &rd.Code, &rd.Status,
 		&rd.PointsSpent, &confirmedBy, &rd.ExpiresAt, &confirmedAt, &rd.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get redemption by code: %w", err)
@@ -280,7 +315,7 @@ func (r *PostgresRepository) GetRedemptionByCode(ctx context.Context, code strin
 
 func (r *PostgresRepository) ConfirmRedemption(ctx context.Context, id, collaboratorID string) error {
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE redemptions SET status = 'confirmed', confirmed_by = $2, confirmed_at = NOW()
+		UPDATE redemptions_earnburn SET status = 'confirmed', confirmed_by = $2, confirmed_at = NOW()
 		WHERE id = $1 AND status = 'pending'
 	`, id, collaboratorID)
 	return err
@@ -288,7 +323,7 @@ func (r *PostgresRepository) ConfirmRedemption(ctx context.Context, id, collabor
 
 func (r *PostgresRepository) ExpirePendingRedemptions(ctx context.Context) (int, error) {
 	res, err := r.db.ExecContext(ctx, `
-		UPDATE redemptions SET status = 'expired'
+		UPDATE redemptions_earnburn SET status = 'expired'
 		WHERE status = 'pending' AND expires_at < NOW()
 	`)
 	if err != nil {
@@ -306,12 +341,12 @@ func (r *PostgresRepository) CreateFeedback(ctx context.Context, clientID, custo
 }
 
 // EnsureBalance creates a zero-balance record if one doesn't exist.
-func (r *PostgresRepository) EnsureBalance(ctx context.Context, clientID, programID string) error {
+func (r *PostgresRepository) EnsureBalance(ctx context.Context, clientID, customerSisfiID string) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO points_balances (client_id, program_id, balance)
+		INSERT INTO balances_earnburn (client_id, customer_sisfi_id, balance)
 		VALUES ($1, $2, 0)
-		ON CONFLICT (client_id, program_id) DO NOTHING
-	`, clientID, programID)
+		ON CONFLICT (client_id, customer_sisfi_id) DO NOTHING
+	`, clientID, customerSisfiID)
 	return err
 }
 
@@ -334,12 +369,12 @@ func (r *PostgresRepository) AddPointsTx(ctx context.Context, t *Transaction) (i
 	err := r.WithTx(ctx, func(tx *sql.Tx) error {
 		// Upsert balance
 		err := tx.QueryRowContext(ctx, `
-			INSERT INTO points_balances (client_id, program_id, balance)
+			INSERT INTO balances_earnburn (client_id, customer_sisfi_id, balance)
 			VALUES ($1, $2, GREATEST(0, $3))
-			ON CONFLICT (client_id, program_id) DO UPDATE
-			SET balance = GREATEST(0, points_balances.balance + $3), updated_at = NOW()
+			ON CONFLICT (client_id, customer_sisfi_id) DO UPDATE
+			SET balance = GREATEST(0, balances_earnburn.balance + $3), updated_at = NOW()
 			RETURNING balance
-		`, t.ClientID, t.ProgramID, t.Amount).Scan(&newBalance)
+		`, t.ClientID, t.CustomerSisfiID, t.Amount).Scan(&newBalance)
 		if err != nil {
 			return fmt.Errorf("upsert balance: %w", err)
 		}
@@ -348,10 +383,10 @@ func (r *PostgresRepository) AddPointsTx(ctx context.Context, t *Transaction) (i
 
 		// Create transaction record
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO points_transactions
-			(id, client_id, program_id, collaborator_id, type, amount, balance_after, invoice_url, description, manual_entry, correctable_until)
-			VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, $11)
-		`, t.ID, t.ClientID, t.ProgramID, t.CollaboratorID, t.Type, t.Amount, t.BalanceAfter,
+			INSERT INTO transactions_earnburn
+			(id, client_id, customer_sisfi_id, collaborator_id, type, amount, balance_after, invoice_url, description, manual_entry, correctable_until)
+			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, $11)
+		`, t.ID, t.ClientID, t.CustomerSisfiID, t.CollaboratorID, t.Type, t.Amount, t.BalanceAfter,
 			t.InvoiceURL, t.Description, t.ManualEntry, t.CorrectableUntil)
 		return err
 	})
@@ -364,11 +399,11 @@ func (r *PostgresRepository) BurnPointsTx(ctx context.Context, t *Transaction, r
 		// Deduct balance
 		var newBalance int
 		err := tx.QueryRowContext(ctx, `
-			UPDATE points_balances
+			UPDATE balances_earnburn
 			SET balance = balance + $3, updated_at = NOW()
-			WHERE client_id = $1 AND program_id = $2 AND balance >= $4
+			WHERE client_id = $1 AND customer_sisfi_id = $2 AND balance >= $4
 			RETURNING balance
-		`, t.ClientID, t.ProgramID, t.Amount, -t.Amount).Scan(&newBalance)
+		`, t.ClientID, t.CustomerSisfiID, t.Amount, -t.Amount).Scan(&newBalance)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("insufficient balance")
@@ -380,61 +415,46 @@ func (r *PostgresRepository) BurnPointsTx(ctx context.Context, t *Transaction, r
 
 		// Transaction record
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO points_transactions (id, client_id, program_id, type, amount, balance_after, description)
+			INSERT INTO transactions_earnburn (id, client_id, customer_sisfi_id, type, amount, balance_after, description)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, t.ID, t.ClientID, t.ProgramID, t.Type, t.Amount, t.BalanceAfter, t.Description)
+		`, t.ID, t.ClientID, t.CustomerSisfiID, t.Type, t.Amount, t.BalanceAfter, t.Description)
 		if err != nil {
 			return fmt.Errorf("create burn tx: %w", err)
 		}
 
 		// Redemption record
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO redemptions (id, client_id, reward_id, program_id, code, status, points_spent, expires_at)
+			INSERT INTO redemptions_earnburn (id, client_id, reward_id, customer_sisfi_id, code, status, points_spent, expires_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		`, rd.ID, rd.ClientID, rd.RewardID, rd.ProgramID, rd.Code, rd.Status, rd.PointsSpent, rd.ExpiresAt)
+		`, rd.ID, rd.ClientID, rd.RewardID, rd.CustomerSisfiID, rd.Code, rd.Status, rd.PointsSpent, rd.ExpiresAt)
 		return err
 	})
 }
 
 // --- Admin CRUD ---
 
-func (r *PostgresRepository) ListPrograms(ctx context.Context) ([]Program, error) {
+func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string) ([]EarnBurnProgram, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, customer_id, type, name, points_ratio, active FROM programs ORDER BY created_at`)
+		`SELECT cs.id, cs.customer_id, cs.name, ec.points_ratio, cs.active
+		 FROM customer_sisfi cs
+		 JOIN config_earnburn ec ON ec.customer_sisfi_id = cs.id
+		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'earn_burn'
+		 ORDER BY cs.created_at`,
+		customerID)
 	if err != nil {
 		return nil, fmt.Errorf("list programs: %w", err)
 	}
 	defer rows.Close()
 
-	var programs []Program
+	var programs []EarnBurnProgram
 	for rows.Next() {
-		var p Program
-		if err := rows.Scan(&p.ID, &p.CustomerID, &p.Type, &p.Name, &p.PointsRatio, &p.Active); err != nil {
+		var p EarnBurnProgram
+		if err := rows.Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.PointsRatio, &p.Active); err != nil {
 			return nil, fmt.Errorf("scan program: %w", err)
 		}
 		programs = append(programs, p)
 	}
 	return programs, nil
-}
-
-func (r *PostgresRepository) CreateProgram(ctx context.Context, p *Program) error {
-	if p.PointsRatio <= 0 {
-		p.PointsRatio = 1000
-	}
-	return r.db.QueryRowContext(ctx,
-		`INSERT INTO programs (customer_id, type, name, points_ratio) VALUES ($1, $2, $3, $4) RETURNING id`,
-		p.CustomerID, p.Type, p.Name, p.PointsRatio,
-	).Scan(&p.ID)
-}
-
-func (r *PostgresRepository) UpdateProgram(ctx context.Context, p *Program) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE programs SET name = COALESCE(NULLIF($2, ''), name),
-		 points_ratio = CASE WHEN $3 > 0 THEN $3 ELSE points_ratio END,
-		 active = COALESCE($4, active), updated_at = NOW() WHERE id = $1`,
-		p.ID, p.Name, p.PointsRatio, p.Active,
-	)
-	return err
 }
 
 func (r *PostgresRepository) GetCustomer(ctx context.Context, id string) (*Customer, error) {
@@ -505,10 +525,10 @@ func (r *PostgresRepository) ListCollaborators(ctx context.Context, customerID s
 	return collabs, nil
 }
 
-func (r *PostgresRepository) ListAllRewards(ctx context.Context, programID string) ([]Reward, error) {
+func (r *PostgresRepository) ListAllRewards(ctx context.Context, customerSisfiID string) ([]Reward, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, customer_id, program_id, name, COALESCE(description, ''), points_cost, active FROM rewards
-		 WHERE program_id = $1 ORDER BY points_cost`, programID)
+		`SELECT id, customer_id, customer_sisfi_id, name, COALESCE(description, ''), points_cost, active FROM rewards_earnburn
+		 WHERE customer_sisfi_id = $1 ORDER BY points_cost`, customerSisfiID)
 	if err != nil {
 		return nil, fmt.Errorf("list all rewards: %w", err)
 	}
@@ -517,7 +537,7 @@ func (r *PostgresRepository) ListAllRewards(ctx context.Context, programID strin
 	var rewards []Reward
 	for rows.Next() {
 		var rw Reward
-		if err := rows.Scan(&rw.ID, &rw.CustomerID, &rw.ProgramID, &rw.Name, &rw.Description, &rw.PointsCost, &rw.Active); err != nil {
+		if err := rows.Scan(&rw.ID, &rw.CustomerID, &rw.CustomerSisfiID, &rw.Name, &rw.Description, &rw.PointsCost, &rw.Active); err != nil {
 			return nil, fmt.Errorf("scan reward: %w", err)
 		}
 		rewards = append(rewards, rw)
@@ -525,25 +545,25 @@ func (r *PostgresRepository) ListAllRewards(ctx context.Context, programID strin
 	return rewards, nil
 }
 
-func (r *PostgresRepository) CreateRewardAdmin(ctx context.Context, programID string, rw *Reward) error {
+func (r *PostgresRepository) CreateRewardAdmin(ctx context.Context, customerSisfiID string, rw *Reward) error {
 	var customerID string
 	err := r.db.QueryRowContext(ctx,
-		`SELECT customer_id FROM programs WHERE id = $1`, programID,
+		`SELECT customer_id FROM customer_sisfi WHERE id = $1`, customerSisfiID,
 	).Scan(&customerID)
 	if err != nil {
-		return fmt.Errorf("get program for reward: %w", err)
+		return fmt.Errorf("get customer_sisfi for reward: %w", err)
 	}
 
 	return r.db.QueryRowContext(ctx,
-		`INSERT INTO rewards (customer_id, program_id, name, description, points_cost)
+		`INSERT INTO rewards_earnburn (customer_id, customer_sisfi_id, name, description, points_cost)
 		 VALUES ($1, $2, $3, NULLIF($4, ''), $5) RETURNING id`,
-		customerID, programID, rw.Name, rw.Description, rw.PointsCost,
+		customerID, customerSisfiID, rw.Name, rw.Description, rw.PointsCost,
 	).Scan(&rw.ID)
 }
 
 func (r *PostgresRepository) UpdateRewardAdmin(ctx context.Context, rw *Reward) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE rewards SET name = COALESCE(NULLIF($2, ''), name),
+		`UPDATE rewards_earnburn SET name = COALESCE(NULLIF($2, ''), name),
 		 description = COALESCE(NULLIF($3, ''), description),
 		 points_cost = CASE WHEN $4 > 0 THEN $4 ELSE points_cost END,
 		 active = COALESCE($5, active), updated_at = NOW() WHERE id = $1`,
@@ -574,6 +594,28 @@ func (r *PostgresRepository) ListFeedback(ctx context.Context, customerID string
 	return entries, nil
 }
 
+func (r *PostgresRepository) ListClients(ctx context.Context, customerID string) ([]Client, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, customer_id, name, phone, created_at FROM clients WHERE customer_id = $1 ORDER BY created_at DESC`,
+		customerID)
+	if err != nil {
+		return nil, fmt.Errorf("list clients: %w", err)
+	}
+	defer rows.Close()
+
+	var clients []Client
+	for rows.Next() {
+		var c Client
+		var name sql.NullString
+		if err := rows.Scan(&c.ID, &c.CustomerID, &name, &c.Phone, &c.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan client: %w", err)
+		}
+		c.Name = name.String
+		clients = append(clients, c)
+	}
+	return clients, nil
+}
+
 func (r *PostgresRepository) RegisterClient(ctx context.Context, customerID, phone string) error {
 	hash := generateClientHash()
 	_, err := r.db.ExecContext(ctx,
@@ -596,7 +638,7 @@ func (r *PostgresRepository) AdjustPointsTx(ctx context.Context, t *Transaction)
 		// Verify original transaction is still correctable
 		var correctableUntil time.Time
 		err := tx.QueryRowContext(ctx,
-			`SELECT correctable_until FROM points_transactions WHERE id = $1 AND correctable_until > NOW()`,
+			`SELECT correctable_until FROM transactions_earnburn WHERE id = $1 AND correctable_until > NOW()`,
 			t.Description, // description stores the original tx ID for adjustments
 		).Scan(&correctableUntil)
 		if err != nil {
@@ -605,11 +647,11 @@ func (r *PostgresRepository) AdjustPointsTx(ctx context.Context, t *Transaction)
 
 		// Update balance
 		err = tx.QueryRowContext(ctx, `
-			UPDATE points_balances
+			UPDATE balances_earnburn
 			SET balance = GREATEST(0, balance + $3), updated_at = NOW()
-			WHERE client_id = $1 AND program_id = $2
+			WHERE client_id = $1 AND customer_sisfi_id = $2
 			RETURNING balance
-		`, t.ClientID, t.ProgramID, t.Amount).Scan(&newBalance)
+		`, t.ClientID, t.CustomerSisfiID, t.Amount).Scan(&newBalance)
 		if err != nil {
 			return fmt.Errorf("adjust balance: %w", err)
 		}
@@ -618,10 +660,10 @@ func (r *PostgresRepository) AdjustPointsTx(ctx context.Context, t *Transaction)
 
 		// Create adjustment transaction
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO points_transactions
-			(id, client_id, program_id, collaborator_id, type, amount, balance_after, correction_reason, correction_evidence_url)
-			VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''))
-		`, t.ID, t.ClientID, t.ProgramID, t.CollaboratorID, t.Type, t.Amount, t.BalanceAfter,
+			INSERT INTO transactions_earnburn
+			(id, client_id, customer_sisfi_id, collaborator_id, type, amount, balance_after, correction_reason, correction_evidence_url)
+			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''))
+		`, t.ID, t.ClientID, t.CustomerSisfiID, t.CollaboratorID, t.Type, t.Amount, t.BalanceAfter,
 			t.CorrectionReason, t.CorrectionEvidenceURL)
 		return err
 	})

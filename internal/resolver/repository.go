@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/lib/pq"
+	"github.com/theluisbolivar/fidel-quick/internal/phone"
 	"github.com/theluisbolivar/fidel-quick/internal/session"
 )
 
@@ -45,14 +47,15 @@ func (r *PostgresRepository) GetActiveCustomerByID(ctx context.Context, id strin
 	return name, nil
 }
 
-func (r *PostgresRepository) UserExistsInBusiness(ctx context.Context, phone, customerID string) (bool, error) {
+func (r *PostgresRepository) UserExistsInBusiness(ctx context.Context, ph, customerID string) (bool, error) {
+	variants := phone.Variants(ph)
 	var exists bool
 	err := r.db.QueryRowContext(ctx,
 		`SELECT EXISTS(
-			SELECT 1 FROM clients WHERE phone = $1 AND customer_id = $2
+			SELECT 1 FROM clients WHERE phone = ANY($1) AND customer_id = $2
 			UNION
-			SELECT 1 FROM collaborators WHERE phone = $1 AND customer_id = $2
-		)`, phone, customerID,
+			SELECT 1 FROM collaborators WHERE phone = ANY($1) AND customer_id = $2
+		)`, pq.Array(variants), customerID,
 	).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("check existing user: %w", err)
@@ -60,16 +63,17 @@ func (r *PostgresRepository) UserExistsInBusiness(ctx context.Context, phone, cu
 	return exists, nil
 }
 
-func (r *PostgresRepository) FindBusinessesByPhone(ctx context.Context, phone string) ([]session.SelectionOption, error) {
+func (r *PostgresRepository) FindBusinessesByPhone(ctx context.Context, ph string) ([]session.SelectionOption, error) {
+	variants := phone.Variants(ph)
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT DISTINCT c.id, c.name FROM customers c
 		INNER JOIN collaborators co ON co.customer_id = c.id
-		WHERE co.phone = $1 AND co.active = true AND c.active = true
+		WHERE co.phone = ANY($1) AND co.active = true AND c.active = true
 		UNION
 		SELECT DISTINCT c.id, c.name FROM customers c
 		INNER JOIN clients cl ON cl.customer_id = c.id
-		WHERE cl.phone = $1 AND c.active = true
-	`, phone)
+		WHERE cl.phone = ANY($1) AND c.active = true
+	`, pq.Array(variants))
 	if err != nil {
 		return nil, fmt.Errorf("query businesses by phone: %w", err)
 	}
@@ -86,11 +90,12 @@ func (r *PostgresRepository) FindBusinessesByPhone(ctx context.Context, phone st
 	return options, nil
 }
 
-func (r *PostgresRepository) FindCollaborator(ctx context.Context, phone, customerID string) (string, error) {
+func (r *PostgresRepository) FindCollaborator(ctx context.Context, ph, customerID string) (string, error) {
+	variants := phone.Variants(ph)
 	var id string
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id FROM collaborators WHERE phone = $1 AND customer_id = $2 AND active = true`,
-		phone, customerID,
+		`SELECT id FROM collaborators WHERE phone = ANY($1) AND customer_id = $2 AND active = true`,
+		pq.Array(variants), customerID,
 	).Scan(&id)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -101,11 +106,12 @@ func (r *PostgresRepository) FindCollaborator(ctx context.Context, phone, custom
 	return id, nil
 }
 
-func (r *PostgresRepository) FindClient(ctx context.Context, phone, customerID string) (string, error) {
+func (r *PostgresRepository) FindClient(ctx context.Context, ph, customerID string) (string, error) {
+	variants := phone.Variants(ph)
 	var id string
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id FROM clients WHERE phone = $1 AND customer_id = $2`,
-		phone, customerID,
+		`SELECT id FROM clients WHERE phone = ANY($1) AND customer_id = $2`,
+		pq.Array(variants), customerID,
 	).Scan(&id)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -146,9 +152,9 @@ func (r *PostgresRepository) GetCustomerBySlug(ctx context.Context, slug string)
 
 func (r *PostgresRepository) GetActiveProgramTypes(ctx context.Context, customerID string) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT 'earn_burn' AS module FROM programs WHERE customer_id = $1 AND active = true
-		UNION
-		SELECT 'cashback' AS module FROM cashback_programs WHERE customer_id = $1 AND active = true
+		SELECT cs.sisfi_id FROM customer_sisfi cs
+		JOIN sisfi s ON s.id = cs.sisfi_id AND s.active = true
+		WHERE cs.customer_id = $1 AND cs.active = true
 	`, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("query active program types: %w", err)
@@ -165,3 +171,4 @@ func (r *PostgresRepository) GetActiveProgramTypes(ctx context.Context, customer
 	}
 	return modules, nil
 }
+

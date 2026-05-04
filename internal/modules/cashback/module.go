@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
+	"github.com/theluisbolivar/fidel-quick/internal/phone"
 )
 
 // Module implements loyalty.Module for the cashback system.
@@ -32,6 +33,12 @@ func (m *Module) Menus() map[string][]loyalty.MenuDefinition {
 
 func (m *Module) FlowDefinitions() map[string]loyalty.FlowDefinition {
 	return FlowDefs()
+}
+
+func (m *Module) Prefixes() []string { return []string{"cb_reward:"} }
+
+func (m *Module) SelectionFlow(prefix string) (string, string) {
+	return "cb_request_redemption", "reward_id"
 }
 
 func (m *Module) RegisterRoutes(rg *gin.RouterGroup) {
@@ -73,12 +80,12 @@ func (m *Module) handleCheckBalance(ctx context.Context, cmd loyalty.Command) (*
 		return nil, err
 	}
 
-	balance, err := m.service.CheckBalance(ctx, cmd.UserContext.UserID, program.ID)
+	balance, err := m.service.CheckBalance(ctx, cmd.UserContext.UserID, program.CustomerSisfiID)
 	if err != nil {
 		return nil, err
 	}
 
-	txs, err := m.service.ListTransactions(ctx, cmd.UserContext.UserID, program.ID, 5)
+	txs, err := m.service.ListTransactions(ctx, cmd.UserContext.UserID, program.CustomerSisfiID, 5)
 	if err != nil {
 		return nil, err
 	}
@@ -104,21 +111,21 @@ func (m *Module) handleListRewards(ctx context.Context, cmd loyalty.Command) (*l
 		return nil, err
 	}
 
-	balance, err := m.service.CheckBalance(ctx, cmd.UserContext.UserID, program.ID)
+	balance, err := m.service.CheckBalance(ctx, cmd.UserContext.UserID, program.CustomerSisfiID)
 	if err != nil {
 		return nil, err
 	}
 
-	rewards, err := m.service.ListRewards(ctx, cmd.UserContext.CustomerID, program.ID, 999999)
+	rewards, err := m.service.ListRewards(ctx, cmd.UserContext.CustomerID, program.CustomerSisfiID, 999999)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(rewards) == 0 {
-		return &loyalty.CommandResult{Message: "No hay beneficios disponibles."}, nil
+		return &loyalty.CommandResult{Message: "No hay recompensas disponibles."}, nil
 	}
 
-	msg := fmt.Sprintf("Tienes *$%.2f MXN*.\n\nBeneficios disponibles:", balance)
+	msg := fmt.Sprintf("Tienes *$%.2f MXN*.\n\nRecompensas disponibles:", balance)
 	for _, rw := range rewards {
 		status := "disponible"
 		if rw.Cost > balance {
@@ -126,7 +133,7 @@ func (m *Module) handleListRewards(ctx context.Context, cmd loyalty.Command) (*l
 		}
 		msg += fmt.Sprintf("\n- *%s* — $%.2f (%s)", rw.Name, rw.Cost, status)
 	}
-	msg += "\n\nSigue acumulando cashback para desbloquear mas beneficios."
+	msg += "\n\nSigue acumulando para desbloquear mas recompensas."
 
 	return &loyalty.CommandResult{Message: msg}, nil
 }
@@ -137,34 +144,34 @@ func (m *Module) handleRedeem(ctx context.Context, cmd loyalty.Command) (*loyalt
 		return nil, err
 	}
 
-	balance, err := m.service.CheckBalance(ctx, cmd.UserContext.UserID, program.ID)
+	balance, err := m.service.CheckBalance(ctx, cmd.UserContext.UserID, program.CustomerSisfiID)
 	if err != nil {
 		return nil, err
 	}
 
 	// Only show rewards the client can afford
-	rewards, err := m.service.ListRewards(ctx, cmd.UserContext.CustomerID, program.ID, balance)
+	rewards, err := m.service.ListRewards(ctx, cmd.UserContext.CustomerID, program.CustomerSisfiID, balance)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(rewards) == 0 {
 		return &loyalty.CommandResult{
-			Message: fmt.Sprintf("No tienes saldo suficiente para canjear.\nTu saldo: *$%.2f MXN*.\n\nSigue acumulando para desbloquear beneficios.", balance),
+			Message: fmt.Sprintf("No tienes saldo suficiente para canjear.\nTu saldo: *$%.2f MXN*.\n\nSigue acumulando para desbloquear recompensas.", balance),
 		}, nil
 	}
 
 	var options []loyalty.CommandOption
 	for _, rw := range rewards {
 		options = append(options, loyalty.CommandOption{
-			ID:          "benefit:" + rw.ID,
+			ID:          "cb_reward:" + rw.ID,
 			Title:       rw.Name,
 			Description: fmt.Sprintf("$%.2f", rw.Cost),
 		})
 	}
 
 	return &loyalty.CommandResult{
-		Message:    fmt.Sprintf("Tienes *$%.2f MXN*. Selecciona un beneficio:", balance),
+		Message:    fmt.Sprintf("Tienes *$%.2f MXN*. Selecciona una recompensa:", balance),
 		Options:    options,
 		ListHeader: "Canjear",
 	}, nil
@@ -183,9 +190,9 @@ func (m *Module) handleRequestRedemption(ctx context.Context, cmd loyalty.Comman
 	}
 
 	rd, code, err := m.service.RequestRedemption(ctx, CashbackRedemptionReq{
-		ClientID:  cmd.UserContext.UserID,
-		ProgramID: program.ID,
-		RewardID:  rewardID,
+		ClientID:        cmd.UserContext.UserID,
+		CustomerSisfiID: program.CustomerSisfiID,
+		RewardID:        rewardID,
 	})
 	if err != nil {
 		return nil, err
@@ -204,7 +211,7 @@ func (m *Module) handleConfirmRedemption(ctx context.Context, cmd loyalty.Comman
 	}
 
 	reward, _ := m.service.GetReward(ctx, rd.RewardID)
-	rewardName := "Beneficio"
+	rewardName := "Recompensa"
 	if reward != nil {
 		rewardName = reward.Name
 	}
@@ -230,6 +237,15 @@ func (m *Module) handleLoadProcess(ctx context.Context, cmd loyalty.Command) (*l
 		return nil, err
 	}
 
+	// Prevent self-accrual
+	clientPhone, err := m.service.GetClientPhone(ctx, otpData.ClientID)
+	if err != nil {
+		return nil, fmt.Errorf("get client phone: %w", err)
+	}
+	if phone.SameNumber(clientPhone, cmd.UserContext.Phone) {
+		return nil, fmt.Errorf("no puedes acreditar cashback a ti mismo")
+	}
+
 	photoURL := cmd.Data["photo"]
 	amountStr := cmd.Data["amount"]
 	amount, _ := strconv.ParseFloat(amountStr, 64)
@@ -240,11 +256,11 @@ func (m *Module) handleLoadProcess(ctx context.Context, cmd loyalty.Command) (*l
 	}
 
 	tx, err := m.service.AddCashback(ctx, AddCashbackReq{
-		ClientID:       otpData.ClientID,
-		ProgramID:      program.ID,
-		CollaboratorID: cmd.UserContext.UserID,
-		Amount:         amount,
-		InvoiceURL:     photoURL,
+		ClientID:        otpData.ClientID,
+		CustomerSisfiID: program.CustomerSisfiID,
+		CollaboratorID:  cmd.UserContext.UserID,
+		Amount:          amount,
+		InvoiceURL:      photoURL,
 	})
 	if err != nil {
 		return nil, err
@@ -261,6 +277,15 @@ func (m *Module) handleAddCashback(ctx context.Context, cmd loyalty.Command) (*l
 		return nil, err
 	}
 
+	// Prevent self-accrual
+	clientPhone, err := m.service.GetClientPhone(ctx, otpData.ClientID)
+	if err != nil {
+		return nil, fmt.Errorf("get client phone: %w", err)
+	}
+	if phone.SameNumber(clientPhone, cmd.UserContext.Phone) {
+		return nil, fmt.Errorf("no puedes acreditar cashback a ti mismo")
+	}
+
 	photoURL := cmd.Data["photo"]
 	amountStr := cmd.Data["amount"]
 	amount, _ := strconv.ParseFloat(amountStr, 64)
@@ -271,11 +296,11 @@ func (m *Module) handleAddCashback(ctx context.Context, cmd loyalty.Command) (*l
 	}
 
 	tx, err := m.service.AddCashback(ctx, AddCashbackReq{
-		ClientID:       otpData.ClientID,
-		ProgramID:      program.ID,
-		CollaboratorID: cmd.UserContext.UserID,
-		Amount:         amount,
-		InvoiceURL:     photoURL,
+		ClientID:        otpData.ClientID,
+		CustomerSisfiID: program.CustomerSisfiID,
+		CollaboratorID:  cmd.UserContext.UserID,
+		Amount:          amount,
+		InvoiceURL:      photoURL,
 	})
 	if err != nil {
 		return nil, err
@@ -304,12 +329,12 @@ func (m *Module) handleListBalance(ctx context.Context, cmd loyalty.Command) (*l
 	}
 
 	clientName, _ := m.service.GetClientName(ctx, otpData.ClientID)
-	balance, err := m.service.CheckBalance(ctx, otpData.ClientID, program.ID)
+	balance, err := m.service.CheckBalance(ctx, otpData.ClientID, program.CustomerSisfiID)
 	if err != nil {
 		return nil, err
 	}
 
-	txs, err := m.service.ListTransactions(ctx, otpData.ClientID, program.ID, 10)
+	txs, err := m.service.ListTransactions(ctx, otpData.ClientID, program.CustomerSisfiID, 10)
 	if err != nil {
 		return nil, err
 	}

@@ -1,86 +1,118 @@
-# fidel-quick
+# Fidel Quick
 
-WhatsApp Business API webhook receiver built with Go and Gin.
+Plataforma modular de fidelidad con bot de WhatsApp, panel de administracion y API REST.
 
-## Prerequisites
-
-- [Go](https://go.dev/dl/) 1.21+
-- [ngrok](https://ngrok.com/download) account and CLI installed
-- A [Meta Developer](https://developers.facebook.com/) app with WhatsApp product enabled
-
-## Setup
-
-### 1. Install dependencies
-
-```bash
-go mod download
-```
-
-### 2. Configure environment variables
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your values:
-
-| Variable | Description |
-|---|---|
-| `WHATSAPP_VERIFY_TOKEN` | A secret string you choose. Must match what you enter in Meta's webhook config. |
-| `WHATSAPP_API_TOKEN` | Your WhatsApp API access token from Meta Developer dashboard. |
-| `WHATSAPP_PHONE_NUMBER_ID` | The Phone Number ID from your WhatsApp Business account. |
-| `PORT` | Server port (default: `8080`). |
-
-### 3. Start the server
-
-```bash
-go run main.go
-```
-
-### 4. Start ngrok
-
-In a separate terminal:
-
-```bash
-ngrok http 8080
-```
-
-ngrok will display a public URL like `https://xxxx-xxxx.ngrok-free.app`. Copy this URL.
-
-> **Note:** The ngrok URL changes every time you restart it (unless you have a paid plan with a fixed domain).
-
-### 5. Configure the webhook in Meta
-
-1. Go to [Meta for Developers](https://developers.facebook.com/) and open your app.
-2. Navigate to **WhatsApp > Configuration**.
-3. Under **Webhook**, click **Edit**:
-   - **Callback URL:** `https://YOUR-NGROK-URL/webhook`
-   - **Verify Token:** the same value you set in `WHATSAPP_VERIFY_TOKEN`
-4. Click **Verify and Save**.
-5. Under **Webhook fields**, find **`messages`** and toggle **Subscribe** on.
-
-### 6. Test
-
-Send a WhatsApp message to your Business number. You should see the log in your server terminal:
-
-```
-[WhatsApp] 5215512345678: Hello!
-```
-
-## Project Structure
+## Arquitectura
 
 ```
 fidel-quick/
-  main.go              # Gin server and route setup
-  webhook/
-    handler.go         # GET /webhook (verification) + POST /webhook (message handling)
-    types.go           # WhatsApp webhook payload structs
-  .env.example         # Environment variable template
+  main.go                    # Entry point, DI, adapters
+  api/
+    router.go                # Gin router, middleware, rutas
+    middleware/               # JWT + Bearer auth
+  internal/
+    admin/                   # Auth (login, registro, onboarding de negocio)
+    onboarding/              # Estado del proceso de onboarding (dominio independiente)
+    config/                  # Env vars
+    flow/                    # Motor de flujos conversacionales (WhatsApp)
+    landing/                 # Pagina publica /unirse/:slug
+    loyalty/                 # Registry de modulos, tipos compartidos
+    modules/
+      earnburn/              # Modulo de puntos (earn_burn)
+      cashback/              # Modulo de cashback
+    resolver/                # Resolucion de negocio y rol por telefono
+    session/                 # Sesiones de usuario (Redis, TTL 30min)
+    platform/
+      whatsapp/              # Webhook handler, client API
+      ai/                    # Gemini (procesamiento de facturas)
+      cache/                 # Redis
+      db/                    # PostgreSQL
+      storage/               # S3/MinIO
+  admin/                     # Frontend React (Vite + TailwindCSS)
+  migrations/                # SQL migrations (golang-migrate)
 ```
 
-## API Endpoints
+## Dominios
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/webhook` | WhatsApp webhook verification (called by Meta during setup) |
-| `POST` | `/webhook` | Receives incoming WhatsApp messages |
+| Dominio | Tabla(s) | Descripcion |
+|---------|----------|-------------|
+| **customer** | `customers` | Negocio/empresa que usa la plataforma |
+| **client** | `clients` | Consumidor final del negocio |
+| **collaborator** | `collaborators` | Empleado que opera el programa via WhatsApp |
+| **program** | `programs`, `cashback_programs` | Programa de fidelidad del negocio |
+| **reward** | `rewards`, `cashback_rewards` | Recompensa canjeable dentro de un programa |
+| **onboarding** | `onboarding` | Estado del proceso de configuracion inicial |
+| **admin** | `admins` | Cuenta de acceso al panel de administracion |
+
+## Modulos de fidelidad
+
+El sistema tiene dos modulos independientes que se registran en el `loyalty.Registry`:
+
+### earn_burn (Puntos)
+- Clientes acumulan puntos por compras
+- Canjean puntos por recompensas
+- `points_ratio`: cuantos puntos por unidad de compra
+
+### cashback
+- Clientes acumulan saldo en pesos por compras
+- Canjean saldo por recompensas
+- `cashback_rate`: porcentaje de cashback sobre el monto
+
+### Limitaciones actuales
+
+- **Un programa activo por tipo por negocio.** Cada customer puede tener maximo 1 programa earn_burn y 1 programa cashback activo simultaneamente. `GetProgram(customerID)` retorna un solo resultado. Si existen multiples programas activos del mismo tipo, el comportamiento es indeterminado.
+- **Sin seleccion de programa.** No hay UI ni flujo de WhatsApp para elegir entre multiples programas del mismo tipo.
+
+## Diagrama ER
+
+Ver el diagrama completo de la base de datos en [`docs/erd.mmd`](docs/erd.mmd).
+
+Para visualizarlo: abrir en [mermaid.live](https://mermaid.live) o usar la extension Mermaid Preview en VS Code.
+
+## Naming conventions
+
+| Concepto | Go | TypeScript | DB | API JSON |
+|----------|-----|-----------|-----|----------|
+| Tipo de programa puntos | `earn_burn` | `"earn_burn"` | `type = 'earn_burn'` | `"earn_burn"` |
+| Tipo de programa cashback | `cashback` | `"cashback"` | `type = 'cashback'` | `"cashback"` |
+| Recompensa (ambos modulos) | `Reward` / `CashbackReward` | `Reward` / `CashbackReward` | `rewards` / `cashback_rewards` | `reward` |
+| Prefix routing WhatsApp | `reward:` (earn_burn) / `cb_reward:` (cashback) | — | — | — |
+
+## Quick Start
+
+### Prerequisitos
+- Go 1.25+
+- Node.js 20+
+- Docker (para Postgres, Redis, MinIO)
+- [golang-migrate](https://github.com/golang-migrate/migrate) CLI
+
+### Desarrollo local
+
+```bash
+# 1. Levantar infraestructura
+make infra-up
+
+# 2. Correr migraciones
+make migrate-up
+
+# 3. Backend + Frontend
+make dev-all
+```
+
+O todo junto:
+```bash
+make start-all
+```
+
+### URLs
+
+| Servicio | URL |
+|----------|-----|
+| Admin (frontend) | http://localhost:5173 |
+| API (backend) | http://localhost:8080 |
+| API Docs (Swagger) | http://localhost:8080/api/docs |
+| MinIO Console | http://localhost:9001 |
+
+## Variables de entorno
+
+Ver `.env.example` para la lista completa.
