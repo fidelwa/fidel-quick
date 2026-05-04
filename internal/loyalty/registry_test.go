@@ -19,10 +19,12 @@ type fakeModule struct {
 	err    error
 }
 
-func (m *fakeModule) Name() string                              { return m.name }
-func (m *fakeModule) Menus() map[string][]MenuDefinition        { return m.menus }
+func (m *fakeModule) Name() string                               { return m.name }
+func (m *fakeModule) Menus() map[string][]MenuDefinition         { return m.menus }
 func (m *fakeModule) FlowDefinitions() map[string]FlowDefinition { return m.flows }
-func (m *fakeModule) RegisterRoutes(rg *gin.RouterGroup)        {}
+func (m *fakeModule) Prefixes() []string                         { return nil }
+func (m *fakeModule) SelectionFlow(string) (string, string)      { return "", "" }
+func (m *fakeModule) RegisterRoutes(rg *gin.RouterGroup)         {}
 func (m *fakeModule) HandleCommand(ctx context.Context, cmd Command) (*CommandResult, error) {
 	return m.result, m.err
 }
