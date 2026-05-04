@@ -165,6 +165,11 @@ func (f *fakeRepo) DeleteStamp(_ context.Context, stampID string) error {
 	return nil
 }
 
+func (f *fakeRepo) FindClientIDByPhone(_ context.Context, customerID, phone string) (string, error) {
+	// Tests don't exercise this path; return empty to keep interface satisfied.
+	return "", nil
+}
+
 func (f *fakeRepo) ListCardsByCustomer(_ context.Context, customerSisfiID, status string, limit int) ([]Card, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -1,6 +1,8 @@
 package pushcard
 
 import (
+	"fmt"
+
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
 )
 
@@ -21,21 +23,45 @@ func CollaboratorMenus() []loyalty.MenuDefinition {
 	}
 }
 
-// FlowDefs returns the multi-step flows. Flow steps for client/collaborator are
-// fleshed out in FID-4 and FID-5; here we declare the shape.
+// FlowDefs returns the multi-step flows for pushcard.
 func FlowDefs() map[string]loyalty.FlowDefinition {
 	return map[string]loyalty.FlowDefinition{
 		"pc_add_stamp": {
 			CommandID: "pc_add_stamp",
 			Steps: []loyalty.StepDefinition{
-				{ID: "ask_phone", Prompt: "Escribe el teléfono del cliente:", Key: "client_phone"},
+				{ID: "ask_phone", Prompt: "Escribe el teléfono del cliente:", Key: "client_phone", Validate: validatePhone},
 			},
 		},
 		"pc_confirm_redemption": {
 			CommandID: "pc_confirm_redemption",
 			Steps: []loyalty.StepDefinition{
-				{ID: "ask_code", Prompt: "Escribe el código de canje:", Key: "code"},
+				{ID: "ask_code", Prompt: "Escribe el código de canje del cliente (6 dígitos):", Key: "code", Validate: validateCodeFormat},
 			},
 		},
 	}
+}
+
+func validateCodeFormat(input string) error {
+	if len(input) != 6 {
+		return fmt.Errorf("el código debe tener 6 dígitos")
+	}
+	for _, c := range input {
+		if c < '0' || c > '9' {
+			return fmt.Errorf("el código solo debe contener dígitos")
+		}
+	}
+	return nil
+}
+
+func validatePhone(input string) error {
+	digits := 0
+	for _, c := range input {
+		if c >= '0' && c <= '9' {
+			digits++
+		}
+	}
+	if digits < 10 {
+		return fmt.Errorf("escribe un teléfono válido (mínimo 10 dígitos)")
+	}
+	return nil
 }

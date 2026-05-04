@@ -262,6 +262,11 @@ func (s *Service) ListCards(ctx context.Context, customerSisfiID, status string,
 	return s.repo.ListCardsByCustomer(ctx, customerSisfiID, status, limit)
 }
 
+// FindClientIDByPhone delegates the client resolution to the repo.
+func (s *Service) FindClientIDByPhone(ctx context.Context, customerID, phoneNumber string) (string, error) {
+	return s.repo.FindClientIDByPhone(ctx, customerID, phoneNumber)
+}
+
 // buildVisual returns a stamps progress string like "●●●○○".
 func buildVisual(count, slots int) string {
 	if slots <= 0 {
