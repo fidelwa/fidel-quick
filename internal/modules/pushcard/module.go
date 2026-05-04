@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
@@ -117,18 +118,25 @@ func (m *Module) handleRedeem(ctx context.Context, cmd loyalty.Command) (*loyalt
 	return &loyalty.CommandResult{Message: msg}, nil
 }
 
-// handleAddStamp is a stub that uses the collaborator + provided client phone.
-// The full collaborator flow lives in FID-5; here we accept the data already
-// collected by FlowDefs and let the service do the work.
+// handleAddStamp resolves the client by the phone the collaborator typed, then
+// adds a stamp to that client's pushcard. If the client doesn't belong to the
+// business, the bot asks them to scan the QR.
 func (m *Module) handleAddStamp(ctx context.Context, cmd loyalty.Command) (*loyalty.CommandResult, error) {
-	clientID := cmd.Data["client_id"]
-	if clientID == "" {
-		return &loyalty.CommandResult{Message: "Falta resolver el cliente. (Flujo completo en FID-5.)"}, nil
-	}
 	cfg, err := m.service.GetConfig(ctx, cmd.UserContext.CustomerID)
 	if err != nil {
 		return nil, err
 	}
+
+	phone := strings.TrimSpace(cmd.Data["client_phone"])
+	clientID, err := m.service.FindClientIDByPhone(ctx, cmd.UserContext.CustomerID, phone)
+	if err != nil {
+		return nil, err
+	}
+	if clientID == "" {
+		msg := "El cliente no está registrado en este negocio.\nPedile que escanee el QR para unirse."
+		return &loyalty.CommandResult{Message: msg}, nil
+	}
+
 	res, err := m.service.AddStamp(ctx, AddStampReq{
 		CustomerSisfiID: cfg.CustomerSisfiID,
 		ClientID:        clientID,
@@ -137,10 +145,13 @@ func (m *Module) handleAddStamp(ctx context.Context, cmd loyalty.Command) (*loya
 	if err != nil {
 		return nil, err
 	}
-	msg := fmt.Sprintf("Sello sumado: %d / %d", res.StampsCount, res.CardSlots)
+
+	visual := buildVisual(res.StampsCount, res.CardSlots)
+	msg := fmt.Sprintf("Sello sumado.\n%s\n%d / %d", visual, res.StampsCount, res.CardSlots)
 	if res.Completed {
-		msg += "\n¡Tarjeta completada! Avisale al cliente."
+		msg += fmt.Sprintf("\n\n¡Tarjeta completada! Avisale al cliente para que canjee *%s*.", cfg.Name)
 	}
+	msg += "\n\n_Podés deshacer este sello en las próximas 2 horas._"
 	return &loyalty.CommandResult{Message: msg}, nil
 }
 
@@ -156,7 +167,15 @@ func (m *Module) handleUndoStamp(ctx context.Context, cmd loyalty.Command) (*loy
 }
 
 func (m *Module) handleConfirmRedemption(ctx context.Context, cmd loyalty.Command) (*loyalty.CommandResult, error) {
-	// Full code-based confirmation lands with FID-5. Here we acknowledge.
-	_ = cmd.Data["code"]
-	return &loyalty.CommandResult{Message: "Confirmación de canje pendiente (FID-5)."}, nil
+	code := strings.TrimSpace(cmd.Data["code"])
+	data, err := m.service.ConfirmRedemption(ctx, code, cmd.UserContext.UserID)
+	if err != nil {
+		return &loyalty.CommandResult{Message: err.Error()}, nil
+	}
+	rewardName := data.RewardName
+	if rewardName == "" {
+		rewardName = "tarjeta de sellos"
+	}
+	msg := fmt.Sprintf("Canje confirmado.\nEntregá: *%s*", rewardName)
+	return &loyalty.CommandResult{Message: msg}, nil
 }

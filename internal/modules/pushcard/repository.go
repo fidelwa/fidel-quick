@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/lib/pq"
+	"github.com/theluisbolivar/fidel-quick/internal/phone"
 )
 
 // Repository abstracts pushcard persistence so the service can be unit-tested with mocks.
@@ -27,6 +30,10 @@ type Repository interface {
 	DeleteStamp(ctx context.Context, stampID string) error
 
 	ListCardsByCustomer(ctx context.Context, customerSisfiID, status string, limit int) ([]Card, error)
+
+	// FindClientIDByPhone resolves a phone number (in any common variant)
+	// to a client_id within the given customer scope.
+	FindClientIDByPhone(ctx context.Context, customerID, phoneNumber string) (string, error)
 }
 
 // PostgresRepository is the concrete Repository backed by Postgres.
@@ -207,6 +214,25 @@ func (r *PostgresRepository) DeleteStamp(ctx context.Context, stampID string) er
 		return fmt.Errorf("delete stamp: %w", err)
 	}
 	return nil
+}
+
+func (r *PostgresRepository) FindClientIDByPhone(ctx context.Context, customerID, phoneNumber string) (string, error) {
+	variants := phone.Variants(phoneNumber)
+	if len(variants) == 0 {
+		return "", fmt.Errorf("teléfono inválido")
+	}
+	var id string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id FROM clients WHERE phone = ANY($1) AND customer_id = $2`,
+		pq.Array(variants), customerID,
+	).Scan(&id)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find client by phone: %w", err)
+	}
+	return id, nil
 }
 
 func (r *PostgresRepository) ListCardsByCustomer(ctx context.Context, customerSisfiID, status string, limit int) ([]Card, error) {
