@@ -20,12 +20,14 @@ var (
 
 // Service implements pushcard business rules.
 type Service struct {
-	repo Repository
-	log  *slog.Logger
+	repo  Repository
+	cache Cache
+	log   *slog.Logger
 }
 
-func NewService(repo Repository, log *slog.Logger) *Service {
-	return &Service{repo: repo, log: log}
+// NewService builds a service. cache may be nil when not exercising redemption.
+func NewService(repo Repository, cache Cache, log *slog.Logger) *Service {
+	return &Service{repo: repo, cache: cache, log: log}
 }
 
 // GetProgress returns the current card status for a client.
@@ -178,6 +180,67 @@ func (s *Service) MarkRedeemed(ctx context.Context, cardID string) error {
 	return s.repo.MarkRedeemed(ctx, cardID)
 }
 
+// RequestRedemption is called by a client whose card is completed. It
+// generates a 6-char code that the collaborator will enter to confirm the
+// canje. The code is stored in cache with TTL = redemptionTTL (1h).
+func (s *Service) RequestRedemption(ctx context.Context, customerSisfiID, clientID, customerID, rewardName string) (string, error) {
+	cards, err := s.repo.ListCardsByCustomer(ctx, customerSisfiID, StatusCompleted, 50)
+	if err != nil {
+		return "", err
+	}
+	var card *Card
+	for i := range cards {
+		if cards[i].ClientID == clientID {
+			card = &cards[i]
+			break
+		}
+	}
+	if card == nil {
+		return "", fmt.Errorf("no tenés ninguna tarjeta completada para canjear")
+	}
+	if s.cache == nil {
+		return "", fmt.Errorf("cache no configurado")
+	}
+
+	code := generateCode(6)
+	data := &RedemptionCode{
+		CardID:          card.ID,
+		ClientID:        clientID,
+		CustomerID:      customerID,
+		CustomerSisfiID: customerSisfiID,
+		RewardName:      rewardName,
+	}
+	if err := s.cache.SetRedemption(ctx, code, data); err != nil {
+		return "", err
+	}
+	s.log.Info("pushcard.redemption.requested",
+		"card_id", card.ID, "client_id", clientID, "code", code)
+	return code, nil
+}
+
+// ConfirmRedemption is called by a collaborator with the code the client
+// generated. It atomically marks the card redeemed and consumes the code.
+func (s *Service) ConfirmRedemption(ctx context.Context, code, collaboratorID string) (*RedemptionCode, error) {
+	if s.cache == nil {
+		return nil, fmt.Errorf("cache no configurado")
+	}
+	data, err := s.cache.ConsumeRedemption(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, fmt.Errorf("código de canje inválido o expirado")
+	}
+	if err := s.repo.MarkRedeemed(ctx, data.CardID); err != nil {
+		// Restore the code so the client can retry.
+		_ = s.cache.SetRedemption(ctx, code, data)
+		return nil, err
+	}
+	s.log.Info("pushcard.redemption.confirmed",
+		"card_id", data.CardID, "code", code, "collaborator_id", collaboratorID)
+	return data, nil
+}
+
 // GetConfig returns the active pushcard config for a customer.
 func (s *Service) GetConfig(ctx context.Context, customerID string) (*Config, error) {
 	return s.repo.GetConfig(ctx, customerID)
@@ -217,4 +280,15 @@ func generateUUID() string {
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// generateCode produces a numeric code of the requested length.
+func generateCode(length int) string {
+	const digits = "0123456789"
+	b := make([]byte, length)
+	_, _ = rand.Read(b)
+	for i := range b {
+		b[i] = digits[int(b[i])%len(digits)]
+	}
+	return string(b)
 }

@@ -85,7 +85,8 @@ func main() {
 
 	// Pushcard module
 	pcRepo := pushcard.NewPostgresRepository(database)
-	pcService := pushcard.NewService(pcRepo, log)
+	pcCache := pushcard.NewRedisCache(redisClient)
+	pcService := pushcard.NewService(pcRepo, pcCache, log)
 	pcAPI := pushcard.NewAPIHandler(pcService)
 	pcModule := pushcard.NewModule(pcService, pcAPI)
 	registry.Register(pcModule)
