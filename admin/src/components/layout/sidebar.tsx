@@ -6,6 +6,7 @@ import {
   Users,
   UserSearch,
   MessageSquare,
+  Stamp,
   LogOut,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -16,6 +17,7 @@ const navItems = [
   { to: "/", label: "Inicio", icon: Home },
   { to: "/perfil", label: "Mi Negocio", icon: Building2 },
   { to: "/programas", label: "Programas", icon: Trophy },
+  { to: "/pushcard", label: "Tarjeta de sellos", icon: Stamp },
   { to: "/colaboradores", label: "Colaboradores", icon: Users },
   { to: "/clientes", label: "Clientes", icon: UserSearch },
   { to: "/feedback", label: "Feedback", icon: MessageSquare },

@@ -128,6 +128,26 @@ export interface CashbackTransaction {
   created_at: string
 }
 
+export interface PushcardConfig {
+  customer_sisfi_id: string
+  customer_id: string
+  name: string
+  card_slots: number
+  reward_on_complete: string
+  active: boolean
+}
+
+export interface PushcardCard {
+  id: string
+  customer_sisfi_id: string
+  client_id: string
+  status: "open" | "completed" | "redeemed" | "cancelled"
+  stamps_count: number
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface Balance {
   client_id: string
   customer_sisfi_id: string
