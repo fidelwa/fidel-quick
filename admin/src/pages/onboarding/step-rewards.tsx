@@ -6,11 +6,18 @@ import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { Gift, Loader2, Plus, Upload, Check, Trash2 } from "lucide-react"
 import * as XLSX from "xlsx"
-import type { Program, CashbackProgram, Reward, CashbackReward } from "@/types"
+import type {
+  Program,
+  CashbackProgram,
+  PushcardConfig,
+  Reward,
+  CashbackReward,
+} from "@/types"
 
 interface StepRewardsProps {
   earnBurnProgram: Program | null
   cashbackProgram: CashbackProgram | null
+  pushcardConfig: PushcardConfig | null
   rewards: Reward[]
   cashbackRewards: CashbackReward[]
   onRewardsChange: (rewards: Reward[]) => void
@@ -33,6 +40,7 @@ interface ExcelRewardRow {
 export function StepRewards({
   earnBurnProgram,
   cashbackProgram,
+  pushcardConfig,
   rewards,
   cashbackRewards,
   onRewardsChange,
@@ -221,8 +229,13 @@ export function StepRewards({
     onCashbackRewardsChange(cashbackRewards.filter((r) => r.id !== id))
   }
 
+  // Earn-burn / cashback necesitan al menos una recompensa cargada para avanzar.
+  // Pushcard configura su `reward_on_complete` desde la pagina dedicada (/pushcard),
+  // no desde el wizard, asi que no bloquea el avance.
+  const requiresExplicitRewards = !!earnBurnProgram || !!cashbackProgram
+
   const handleNext = () => {
-    if (totalRewards === 0) {
+    if (requiresExplicitRewards && totalRewards === 0) {
       toast.error("Crea al menos una recompensa")
       return
     }
@@ -466,6 +479,28 @@ export function StepRewards({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Pushcard nota informativa */}
+      {pushcardConfig && !earnBurnProgram && !cashbackProgram && (
+        <div className="rounded-lg border bg-muted/30 p-4 space-y-1">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Gift className="h-4 w-4" />
+            Tarjeta de sellos: {pushcardConfig.name}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            La recompensa al completar los {pushcardConfig.card_slots} sellos se configura
+            desde la pagina <span className="font-medium">Tarjeta de sellos</span>. Continua
+            para terminar el onboarding.
+          </p>
+        </div>
+      )}
+
+      {pushcardConfig && (earnBurnProgram || cashbackProgram) && (
+        <p className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          Recordatorio: la recompensa de la tarjeta de sellos ({pushcardConfig.name}) se
+          configura aparte desde la pagina Tarjeta de sellos.
+        </p>
       )}
 
       <div className="flex justify-between">

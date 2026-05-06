@@ -142,6 +142,7 @@ export function OnboardingLayout() {
           <StepRewards
             earnBurnProgram={onboarding.earnBurnProgram}
             cashbackProgram={onboarding.cashbackProgram}
+            pushcardConfig={onboarding.pushcardConfig}
             rewards={onboarding.rewards}
             cashbackRewards={onboarding.cashbackRewards}
             onRewardsChange={onboarding.setRewards}
