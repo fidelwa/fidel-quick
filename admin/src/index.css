@@ -84,6 +84,53 @@
   }
 }
 
+/*
+ * Fidel design system — Glassmorphism Aurora.
+ * See Notion doc: Sistema de diseño Fidel — Glassmorphism Aurora.
+ * Tokens y utilidades para aplicar el lenguaje visual del panel.
+ */
+@layer utilities {
+  /* Pastel aurora gradient — fondo de página */
+  .bg-aurora {
+    background:
+      radial-gradient(circle at 0% 0%, #b49dd9 0%, transparent 45%),
+      radial-gradient(circle at 100% 100%, #a8cde0 0%, transparent 45%),
+      radial-gradient(circle at 50% 60%, #e0b0cc 0%, transparent 35%),
+      #faf7f5;
+    background-attachment: fixed;
+  }
+
+  /* Glass surface — tarjetas, modales, paneles */
+  .glass {
+    background-color: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    box-shadow:
+      0 8px 32px rgba(31, 38, 135, 0.08),
+      0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+
+  /* Glass-strong — overlays/modales/sidebar (más opaco) */
+  .glass-strong {
+    background-color: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    box-shadow:
+      0 8px 32px rgba(31, 38, 135, 0.08),
+      0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+
+  /* Glass-subtle — separadores, chips, headers */
+  .glass-subtle {
+    background-color: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+  }
+}
+
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
   15% { transform: translateX(-6px); }

@@ -36,9 +36,9 @@ export function AppLayout() {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="bg-aurora flex h-screen">
       {/* Desktop sidebar */}
-      <aside className="hidden w-64 border-r lg:block">
+      <aside className="hidden w-64 border-r border-white/40 lg:block">
         <Sidebar />
       </aside>
 

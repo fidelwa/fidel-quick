@@ -8,7 +8,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
   const { data: customer } = useCustomer(customerId)
 
   return (
-    <header className="flex h-14 items-center gap-4 border-b bg-background px-4 lg:px-6">
+    <header className="glass-subtle flex h-14 items-center gap-4 rounded-none px-4 lg:px-6">
       <Button
         variant="ghost"
         size="icon"
