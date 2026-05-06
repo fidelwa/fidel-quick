@@ -14,6 +14,7 @@ import type {
   Balance,
   PushcardConfig,
   PushcardCard,
+  AdminSummary,
   AuthResponse,
   OnboardingRegisterRequest,
   GoogleOnboardingRequest,
@@ -207,6 +208,19 @@ export const loginGoogle = (googleToken: string) =>
     method: "POST",
     body: JSON.stringify({ google_token: googleToken }),
   })
+
+export const linkGoogle = (googleToken: string) =>
+  request<AdminSummary>(`/auth/link/google`, {
+    method: "POST",
+    body: JSON.stringify({ google_token: googleToken }),
+  })
+
+export const unlinkGoogle = () =>
+  request<AdminSummary>(`/auth/link/google`, {
+    method: "DELETE",
+  })
+
+export const getMe = () => request<AdminSummary>(`/auth/me`)
 
 // Onboarding
 export const getOnboarding = () =>

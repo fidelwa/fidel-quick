@@ -72,6 +72,9 @@ func SetupRouter(
 	v1.Use(middleware.JWTOrBearer(jwtSecret, bearerToken))
 	v1.Use(apperror.ErrorHandler(log))
 
+	// Authenticated admin routes (link/unlink Google, me)
+	adminAPI.RegisterAuthenticatedRoutes(v1)
+
 	// Onboarding routes (JWT-authenticated)
 	onboardingAPI.RegisterRoutes(v1)
 

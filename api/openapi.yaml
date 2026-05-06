@@ -267,6 +267,106 @@ components:
           type: string
           format: date-time
 
+    # --- Auth & Admin ---
+    AdminSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        customer_id:
+          type: string
+          format: uuid
+        google_email:
+          type: string
+          format: email
+          nullable: true
+          description: Email de la cuenta Google vinculada (si existe)
+      required: [id, email, customer_id]
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT de 72h para autenticar peticiones subsiguientes
+        admin:
+          $ref: "#/components/schemas/AdminSummary"
+      required: [token, admin]
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+
+    RegisterRequest:
+      type: object
+      required: [email, password, customer_id]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+        customer_id:
+          type: string
+          format: uuid
+
+    GoogleLoginRequest:
+      type: object
+      required: [google_token]
+      properties:
+        google_token:
+          type: string
+          description: ID token (JWT) emitido por Google Identity Services
+
+    OnboardingRegisterRequest:
+      type: object
+      required: [name, phone, admin_email, admin_password]
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        description:
+          type: string
+        admin_email:
+          type: string
+          format: email
+        admin_password:
+          type: string
+          minLength: 8
+
+    GoogleOnboardingRequest:
+      type: object
+      required: [google_token, name, phone]
+      properties:
+        google_token:
+          type: string
+        name:
+          type: string
+        phone:
+          type: string
+        description:
+          type: string
+
+    LinkGoogleRequest:
+      type: object
+      required: [google_token]
+      properties:
+        google_token:
+          type: string
+
     # --- Feedback ---
     Feedback:
       type: object
@@ -283,6 +383,260 @@ components:
           format: date-time
 
 paths:
+  # ========== Auth ==========
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login con email + password
+      description: Autentica un admin existente y devuelve un JWT de 72h.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Credenciales válidas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Body inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Credenciales inválidas o admin no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/login/google:
+    post:
+      tags: [Auth]
+      summary: Login con Google (ID token)
+      description: |
+        Verifica el ID token contra la JWKS pública de Google y emite un JWT propio.
+        Si el `sub` aún no está vinculado pero el email coincide con un admin existente,
+        se vincula automáticamente.
+      operationId: loginGoogle
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleLoginRequest"
+      responses:
+        "200":
+          description: Login exitoso
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: google_token faltante
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Token inválido, audience mismatch, email no verificado, o admin no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Crear admin para un customer existente
+      description: |
+        Endpoint público que crea un nuevo admin asociado a un `customer_id` ya existente.
+        Para crear el customer + admin a la vez, usar `/onboarding/register`.
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Admin creado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Body inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Email ya registrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/link/google:
+    post:
+      tags: [Auth]
+      summary: Vincular cuenta Google al admin actual
+      description: |
+        Asocia el `sub` del ID token de Google al admin identificado por el JWT.
+        Permite hacer login posterior con Google sin perder la contraseña.
+      operationId: linkGoogle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkGoogleRequest"
+      responses:
+        "200":
+          description: Vinculación exitosa
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSummary"
+        "400":
+          description: google_token faltante o JWT sin admin_id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: ID token de Google inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: La cuenta Google ya está vinculada a otro admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags: [Auth]
+      summary: Desvincular cuenta Google del admin actual
+      operationId: unlinkGoogle
+      responses:
+        "200":
+          description: Desvinculado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSummary"
+        "400":
+          description: JWT sin admin_id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Devuelve el admin del JWT actual
+      description: Útil para refrescar estado de vinculación con Google después de un link/unlink.
+      operationId: getMe
+      responses:
+        "200":
+          description: Admin actual
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSummary"
+        "400":
+          description: JWT sin admin_id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ========== Onboarding ==========
+  /onboarding/register:
+    post:
+      tags: [Onboarding]
+      summary: Crear customer + admin (signup con email/password)
+      description: |
+        Endpoint público que crea un negocio nuevo (`customer`) junto con su primer admin.
+        Genera un slug único derivado del nombre.
+      operationId: onboardingRegister
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingRegisterRequest"
+      responses:
+        "201":
+          description: Negocio + admin creados
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Body inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Email ya registrado o slug colisionando
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /onboarding/register/google:
+    post:
+      tags: [Onboarding]
+      summary: Crear customer + admin (signup con Google)
+      description: |
+        Verifica el ID token de Google, crea el customer y un admin con `google_sub` poblado.
+        El admin no tiene contraseña — autenticación posterior es solo con Google
+        (o vinculando una contraseña vía endpoints futuros).
+      operationId: onboardingGoogle
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleOnboardingRequest"
+      responses:
+        "201":
+          description: Negocio + admin creados
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Body inválido o ID token inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Email ya registrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   # ========== Programs ==========
   /programs:
     get:

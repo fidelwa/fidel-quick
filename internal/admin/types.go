@@ -7,6 +7,8 @@ type Admin struct {
 	CustomerID   string    `json:"customer_id"`
 	Email        string    `json:"email"`
 	PasswordHash string    `json:"-"`
+	GoogleSub    *string   `json:"-"`
+	GoogleEmail  *string   `json:"google_email,omitempty"`
 	Active       bool      `json:"active"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -37,9 +39,10 @@ type AuthResponse struct {
 }
 
 type AdminSummary struct {
-	ID         string `json:"id"`
-	Email      string `json:"email"`
-	CustomerID string `json:"customer_id"`
+	ID          string  `json:"id"`
+	Email       string  `json:"email"`
+	CustomerID  string  `json:"customer_id"`
+	GoogleEmail *string `json:"google_email,omitempty"`
 }
 
 type GoogleOnboardingRequest struct {
@@ -50,5 +53,10 @@ type GoogleOnboardingRequest struct {
 }
 
 type GoogleLoginRequest struct {
+	GoogleToken string `json:"google_token" binding:"required"`
+}
+
+// LinkGoogleRequest binds the body of POST /api/v1/auth/link/google.
+type LinkGoogleRequest struct {
 	GoogleToken string `json:"google_token" binding:"required"`
 }

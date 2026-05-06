@@ -21,6 +21,9 @@ import {
   onboardingRegister,
   onboardingGoogle,
   loginGoogle,
+  linkGoogle,
+  unlinkGoogle,
+  getMe,
 } from "../api-client"
 
 const mockFetch = vi.fn()
@@ -305,6 +308,39 @@ describe("onboarding endpoints", () => {
       expect.objectContaining({ method: "POST" })
     )
     expect(result.token).toBe("t1")
+  })
+
+  it("linkGoogle sends POST with google_token to /auth/link/google", async () => {
+    mockResponse({ id: "a1", email: "a@b.com", customer_id: "c1", google_email: "a@gmail.com" })
+    const result = await linkGoogle("gtoken")
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("/auth/link/google"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ google_token: "gtoken" }),
+      })
+    )
+    expect(result.google_email).toBe("a@gmail.com")
+  })
+
+  it("unlinkGoogle sends DELETE to /auth/link/google", async () => {
+    mockResponse({ id: "a1", email: "a@b.com", customer_id: "c1" })
+    const result = await unlinkGoogle()
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("/auth/link/google"),
+      expect.objectContaining({ method: "DELETE" })
+    )
+    expect(result.google_email).toBeUndefined()
+  })
+
+  it("getMe sends GET to /auth/me", async () => {
+    mockResponse({ id: "a1", email: "a@b.com", customer_id: "c1", google_email: "a@gmail.com" })
+    const result = await getMe()
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("/auth/me"),
+      expect.objectContaining({})
+    )
+    expect(result.google_email).toBe("a@gmail.com")
   })
 })
 

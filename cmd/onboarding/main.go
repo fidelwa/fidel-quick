@@ -32,7 +32,11 @@ func main() {
 
 	// Admin service (handles onboarding + auth)
 	adminRepo := admin.NewPostgresRepository(database)
-	adminService := admin.NewService(adminRepo, cfg.JWTSecret, cfg.GoogleClientID)
+	var googleVerifier admin.GoogleVerifier
+	if cfg.GoogleClientID != "" {
+		googleVerifier = admin.NewGoogleVerifier(cfg.GoogleClientID)
+	}
+	adminService := admin.NewService(adminRepo, cfg.JWTSecret, googleVerifier)
 	adminAPI := admin.NewAPIHandler(adminService)
 
 	// Router

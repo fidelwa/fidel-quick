@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/theluisbolivar/fidel-quick/internal/apperror"
 )
 
 type APIHandler struct {
@@ -14,10 +15,19 @@ func NewAPIHandler(service *Service) *APIHandler {
 	return &APIHandler{service: service}
 }
 
+// RegisterRoutes registers public auth endpoints (login, register, login/google).
 func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/login", h.Login)
 	rg.POST("/login/google", h.GoogleLogin)
 	rg.POST("/register", h.Register)
+}
+
+// RegisterAuthenticatedRoutes registers endpoints that require a valid admin
+// JWT (account linking with Google). Mount under the JWT-protected group.
+func (h *APIHandler) RegisterAuthenticatedRoutes(rg *gin.RouterGroup) {
+	rg.POST("/auth/link/google", h.LinkGoogle)
+	rg.DELETE("/auth/link/google", h.UnlinkGoogle)
+	rg.GET("/auth/me", h.Me)
 }
 
 func (h *APIHandler) RegisterOnboardingRoutes(rg *gin.RouterGroup) {
@@ -103,4 +113,90 @@ func (h *APIHandler) Onboard(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, resp)
+}
+
+// LinkGoogle vincula una cuenta Google al admin del JWT actual.
+func (h *APIHandler) LinkGoogle(c *gin.Context) {
+	adminID, ok := currentAdminID(c)
+	if !ok {
+		c.Error(apperror.BadRequest("token sin admin_id (usar login JWT)", nil)) //nolint:errcheck
+		return
+	}
+
+	var req LinkGoogleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.BadRequest("google_token es requerido", err)) //nolint:errcheck
+		return
+	}
+
+	admin, err := h.service.LinkGoogle(adminID, req.GoogleToken)
+	if err != nil {
+		c.Error(toAppError(err)) //nolint:errcheck
+		return
+	}
+	c.JSON(http.StatusOK, AdminSummary{
+		ID:          admin.ID,
+		Email:       admin.Email,
+		CustomerID:  admin.CustomerID,
+		GoogleEmail: admin.GoogleEmail,
+	})
+}
+
+// UnlinkGoogle remueve la vinculación con Google del admin del JWT actual.
+func (h *APIHandler) UnlinkGoogle(c *gin.Context) {
+	adminID, ok := currentAdminID(c)
+	if !ok {
+		c.Error(apperror.BadRequest("token sin admin_id (usar login JWT)", nil)) //nolint:errcheck
+		return
+	}
+	admin, err := h.service.UnlinkGoogle(adminID)
+	if err != nil {
+		c.Error(toAppError(err)) //nolint:errcheck
+		return
+	}
+	c.JSON(http.StatusOK, AdminSummary{
+		ID:          admin.ID,
+		Email:       admin.Email,
+		CustomerID:  admin.CustomerID,
+		GoogleEmail: admin.GoogleEmail,
+	})
+}
+
+// Me devuelve el admin del JWT actual (incluye estado de vinculación con Google).
+func (h *APIHandler) Me(c *gin.Context) {
+	adminID, ok := currentAdminID(c)
+	if !ok {
+		c.Error(apperror.BadRequest("token sin admin_id (usar login JWT)", nil)) //nolint:errcheck
+		return
+	}
+	admin, err := h.service.repo.GetByID(adminID)
+	if err != nil {
+		c.Error(toAppError(err)) //nolint:errcheck
+		return
+	}
+	c.JSON(http.StatusOK, AdminSummary{
+		ID:          admin.ID,
+		Email:       admin.Email,
+		CustomerID:  admin.CustomerID,
+		GoogleEmail: admin.GoogleEmail,
+	})
+}
+
+func currentAdminID(c *gin.Context) (string, bool) {
+	v, exists := c.Get("admin_id")
+	if !exists {
+		return "", false
+	}
+	id, ok := v.(string)
+	if !ok || id == "" {
+		return "", false
+	}
+	return id, true
+}
+
+func toAppError(err error) error {
+	if _, ok := err.(*apperror.AppError); ok {
+		return err
+	}
+	return apperror.Internal(err.Error(), err)
 }

@@ -3,8 +3,10 @@ import { useForm } from "react-hook-form"
 import { z } from "zod/v4"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
+import { GoogleLogin, type CredentialResponse } from "@react-oauth/google"
 import { useAuth } from "@/context/auth-context"
 import { useCustomer, useUpdateCustomer } from "@/hooks/use-customer"
+import { useMe, useLinkGoogle, useUnlinkGoogle } from "@/hooks/use-me"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -34,6 +36,9 @@ export function ProfilePage() {
   const { customerId } = useAuth()
   const { data: customer, isLoading } = useCustomer(customerId)
   const updateCustomer = useUpdateCustomer(customerId)
+  const { data: me, isLoading: meLoading } = useMe()
+  const linkGoogle = useLinkGoogle()
+  const unlinkGoogle = useUnlinkGoogle()
 
   const form = useForm<ProfileFormValues>({
     resolver: zodResolver(profileSchema),
@@ -68,6 +73,26 @@ export function ProfilePage() {
       onError: (err) => toast.error(err.message),
     })
   }
+
+  const handleGoogleLink = (response: CredentialResponse) => {
+    if (!response.credential) {
+      toast.error("Google no devolvió credencial")
+      return
+    }
+    linkGoogle.mutate(response.credential, {
+      onSuccess: () => toast.success("Cuenta de Google vinculada"),
+      onError: (err) => toast.error(err.message || "No se pudo vincular Google"),
+    })
+  }
+
+  const handleGoogleUnlink = () => {
+    unlinkGoogle.mutate(undefined, {
+      onSuccess: () => toast.success("Cuenta de Google desvinculada"),
+      onError: (err) => toast.error(err.message || "No se pudo desvincular Google"),
+    })
+  }
+
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
 
   if (isLoading) {
     return (
@@ -188,6 +213,53 @@ export function ProfilePage() {
               </Button>
             </form>
           </Form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Cuenta de Google</CardTitle>
+          <CardDescription>
+            Vincula tu cuenta Google para iniciar sesion con un click.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {meLoading ? (
+            <Skeleton className="h-12 w-full" />
+          ) : me?.google_email ? (
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium">Cuenta vinculada</p>
+                <p className="text-sm text-muted-foreground">{me.google_email}</p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleGoogleUnlink}
+                disabled={unlinkGoogle.isPending}
+              >
+                {unlinkGoogle.isPending ? "Desvinculando..." : "Desvincular"}
+              </Button>
+            </div>
+          ) : googleClientId ? (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">
+                No tienes ninguna cuenta de Google vinculada.
+              </p>
+              <div className="flex justify-start">
+                <GoogleLogin
+                  onSuccess={handleGoogleLink}
+                  onError={() => toast.error("Error al conectar con Google")}
+                  text="continue_with"
+                  shape="rectangular"
+                  size="large"
+                />
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Configura <code>VITE_GOOGLE_CLIENT_ID</code> para habilitar Google.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>
