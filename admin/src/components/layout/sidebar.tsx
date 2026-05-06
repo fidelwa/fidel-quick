@@ -27,9 +27,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { logout } = useAuth()
 
   return (
-    <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex h-14 items-center border-b px-4">
-        <span className="text-lg font-semibold">Fidel Admin</span>
+    <div className="glass-strong flex h-full flex-col rounded-none border-0 text-sidebar-foreground">
+      <div className="flex h-14 items-center border-b border-white/40 px-4">
+        <span className="text-lg font-semibold tracking-tight">Fidel Admin</span>
       </div>
       <nav className="flex-1 space-y-1 p-3">
         {navItems.map((item) => (
