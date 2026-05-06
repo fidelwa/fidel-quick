@@ -147,6 +147,7 @@ export function OnboardingLayout() {
             cashbackRewards={onboarding.cashbackRewards}
             onRewardsChange={onboarding.setRewards}
             onCashbackRewardsChange={onboarding.setCashbackRewards}
+            onPushcardConfigChange={onboarding.setPushcardConfig}
             onNext={onboarding.nextStep}
             onPrev={onboarding.prevStep}
           />

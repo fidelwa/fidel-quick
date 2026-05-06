@@ -1,10 +1,11 @@
 import { useState, useRef } from "react"
 import { useCreateReward } from "@/hooks/use-rewards"
 import { useCreateCashbackReward } from "@/hooks/use-cashback-rewards"
+import { useUpsertPushcardConfig } from "@/hooks/use-pushcard"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
-import { Gift, Loader2, Plus, Upload, Check, Trash2 } from "lucide-react"
+import { Gift, Loader2, Plus, Upload, Check, Trash2, Stamp } from "lucide-react"
 import * as XLSX from "xlsx"
 import type {
   Program,
@@ -22,6 +23,7 @@ interface StepRewardsProps {
   cashbackRewards: CashbackReward[]
   onRewardsChange: (rewards: Reward[]) => void
   onCashbackRewardsChange: (rewards: CashbackReward[]) => void
+  onPushcardConfigChange: (cfg: PushcardConfig) => void
   onNext: () => void
   onPrev: () => void
 }
@@ -45,11 +47,16 @@ export function StepRewards({
   cashbackRewards,
   onRewardsChange,
   onCashbackRewardsChange,
+  onPushcardConfigChange,
   onNext,
   onPrev,
 }: StepRewardsProps) {
   const createReward = useCreateReward(earnBurnProgram?.id ?? "")
   const createCashbackReward = useCreateCashbackReward(cashbackProgram?.id ?? "")
+  const upsertPushcardConfig = useUpsertPushcardConfig(pushcardConfig?.customer_sisfi_id ?? "")
+
+  const [pushcardReward, setPushcardReward] = useState(pushcardConfig?.reward_on_complete ?? "")
+  const [savingPushcard, setSavingPushcard] = useState(false)
 
   const [rewardName, setRewardName] = useState("")
   const [rewardDesc, setRewardDesc] = useState("")
@@ -66,7 +73,6 @@ export function StepRewards({
   const earnFileRef = useRef<HTMLInputElement>(null)
   const cbFileRef = useRef<HTMLInputElement>(null)
 
-  const totalRewards = rewards.length + cashbackRewards.length
 
   const handleAddReward = async () => {
     if (!rewardName.trim()) {
@@ -229,14 +235,44 @@ export function StepRewards({
     onCashbackRewardsChange(cashbackRewards.filter((r) => r.id !== id))
   }
 
-  // Earn-burn / cashback necesitan al menos una recompensa cargada para avanzar.
-  // Pushcard configura su `reward_on_complete` desde la pagina dedicada (/pushcard),
-  // no desde el wizard, asi que no bloquea el avance.
-  const requiresExplicitRewards = !!earnBurnProgram || !!cashbackProgram
+  const handleSavePushcardReward = async () => {
+    if (!pushcardConfig) return
+    const trimmed = pushcardReward.trim()
+    if (!trimmed) {
+      toast.error("Ingresa la recompensa de la tarjeta")
+      return
+    }
+    if (trimmed === (pushcardConfig.reward_on_complete ?? "").trim()) return
+    setSavingPushcard(true)
+    try {
+      const updated = await upsertPushcardConfig.mutateAsync({
+        card_slots: pushcardConfig.card_slots,
+        reward_on_complete: trimmed,
+      })
+      onPushcardConfigChange(updated)
+      toast.success("Recompensa guardada")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error al guardar")
+    } finally {
+      setSavingPushcard(false)
+    }
+  }
+
+  // Para avanzar: cada programa activo aporta su propio requisito.
+  // - earn-burn / cashback: al menos una recompensa creada.
+  // - pushcard: reward_on_complete no vacio.
+  const earnBurnReady = !earnBurnProgram || rewards.length > 0
+  const cashbackReady = !cashbackProgram || cashbackRewards.length > 0
+  const pushcardSavedReward = (pushcardConfig?.reward_on_complete ?? "").trim()
+  const pushcardReady = !pushcardConfig || pushcardSavedReward.length > 0
 
   const handleNext = () => {
-    if (requiresExplicitRewards && totalRewards === 0) {
+    if (!earnBurnReady || !cashbackReady) {
       toast.error("Crea al menos una recompensa")
+      return
+    }
+    if (!pushcardReady) {
+      toast.error("Ingresa la recompensa de la tarjeta de sellos")
       return
     }
     onNext()
@@ -481,26 +517,49 @@ export function StepRewards({
         </div>
       )}
 
-      {/* Pushcard nota informativa */}
-      {pushcardConfig && !earnBurnProgram && !cashbackProgram && (
-        <div className="rounded-lg border bg-muted/30 p-4 space-y-1">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <Gift className="h-4 w-4" />
-            Tarjeta de sellos: {pushcardConfig.name}
+      {/* Pushcard reward (single text field) */}
+      {pushcardConfig && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium">
+              <Stamp className="mr-1 inline h-4 w-4" />
+              Recompensa de Tarjeta — {pushcardConfig.name}
+              {pushcardSavedReward && (
+                <Check className="ml-2 inline h-4 w-4 text-green-600" />
+              )}
+            </h3>
           </div>
-          <p className="text-sm text-muted-foreground">
-            La recompensa al completar los {pushcardConfig.card_slots} sellos se configura
-            desde la pagina <span className="font-medium">Tarjeta de sellos</span>. Continua
-            para terminar el onboarding.
-          </p>
-        </div>
-      )}
 
-      {pushcardConfig && (earnBurnProgram || cashbackProgram) && (
-        <p className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-          Recordatorio: la recompensa de la tarjeta de sellos ({pushcardConfig.name}) se
-          configura aparte desde la pagina Tarjeta de sellos.
-        </p>
+          <div className="rounded-lg border p-3">
+            <p className="mb-2 text-xs text-muted-foreground">
+              Recompensa que el cliente recibe al completar los {pushcardConfig.card_slots} sellos.
+            </p>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Cafe gratis"
+                value={pushcardReward}
+                onChange={(e) => setPushcardReward(e.target.value)}
+                onBlur={handleSavePushcardReward}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    handleSavePushcardReward()
+                  }
+                }}
+                className="text-sm"
+              />
+              <Button
+                onClick={handleSavePushcardReward}
+                disabled={
+                  savingPushcard ||
+                  pushcardReward.trim() === (pushcardConfig.reward_on_complete ?? "").trim()
+                }
+              >
+                {savingPushcard ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="flex justify-between">

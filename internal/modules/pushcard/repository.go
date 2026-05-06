@@ -80,7 +80,7 @@ func (r *PostgresRepository) GetConfigByID(ctx context.Context, customerSisfiID 
 func (r *PostgresRepository) UpsertConfig(ctx context.Context, cfg *Config) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO pushcard_config (customer_sisfi_id, card_slots, reward_on_complete)
-		VALUES ($1, $2, NULLIF($3, '')::uuid)
+		VALUES ($1, $2, NULLIF($3, ''))
 		ON CONFLICT (customer_sisfi_id) DO UPDATE
 		SET card_slots = EXCLUDED.card_slots,
 		    reward_on_complete = EXCLUDED.reward_on_complete,

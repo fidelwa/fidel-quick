@@ -42,10 +42,12 @@ const mockCbReward: CashbackReward = {
 const defaultProps = {
   earnBurnProgram,
   cashbackProgram: null as CashbackProgram | null,
+  pushcardConfig: null,
   rewards: [] as Reward[],
   cashbackRewards: [] as CashbackReward[],
   onRewardsChange: vi.fn(),
   onCashbackRewardsChange: vi.fn(),
+  onPushcardConfigChange: vi.fn(),
   onNext: vi.fn(),
   onPrev: vi.fn(),
 }
