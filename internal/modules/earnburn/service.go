@@ -359,6 +359,32 @@ func (s *Service) ListPrograms(ctx context.Context, customerID string) ([]EarnBu
 	return programs, nil
 }
 
+func (s *Service) CreateProgram(ctx context.Context, p *EarnBurnProgram) error {
+	if p.CustomerID == "" || p.Name == "" || p.PointsRatio <= 0 {
+		return apperror.BadRequest("customer_id, name y points_ratio (>0) son requeridos", nil)
+	}
+	if err := s.repo.CreateProgram(ctx, p); err != nil {
+		return apperror.Internal("error al crear programa", err)
+	}
+	return nil
+}
+
+func (s *Service) UpdateProgram(ctx context.Context, customerSisfiID, name string, pointsRatio int) error {
+	if customerSisfiID == "" {
+		return apperror.BadRequest("id requerido", nil)
+	}
+	if name == "" || pointsRatio <= 0 {
+		return apperror.BadRequest("name y points_ratio (>0) son requeridos", nil)
+	}
+	if err := s.repo.UpdateProgram(ctx, customerSisfiID, name, pointsRatio); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apperror.NotFound("programa no encontrado", err)
+		}
+		return apperror.Internal("error al actualizar programa", err)
+	}
+	return nil
+}
+
 func (s *Service) GetCustomer(ctx context.Context, id string) (*Customer, error) {
 	c, err := s.repo.GetCustomer(ctx, id)
 	if err != nil {

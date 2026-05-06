@@ -21,6 +21,7 @@ func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	programs := rg.Group("/cashback-programs")
 	{
 		programs.GET("", h.listPrograms)
+		programs.POST("", h.createProgram)
 		programs.POST("/:id/rewards", h.createReward)
 		programs.GET("/:id/rewards", h.listRewards)
 		programs.PUT("/:id/rewards/:reward_id", h.updateReward)
@@ -39,6 +40,61 @@ func (h *APIHandler) listPrograms(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, programs)
+}
+
+func (h *APIHandler) createProgram(c *gin.Context) {
+	var req struct {
+		CustomerID   string  `json:"customer_id" binding:"required"`
+		Name         string  `json:"name" binding:"required"`
+		CashbackRate float64 `json:"cashback_rate" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.BadRequest("datos invalidos", err))
+		return
+	}
+	p := &CashbackProgram{
+		CustomerID:   req.CustomerID,
+		Name:         req.Name,
+		CashbackRate: req.CashbackRate,
+	}
+	if err := h.service.CreateProgram(c.Request.Context(), p); err != nil {
+		c.Error(err)
+		return
+	}
+	// Echo back the rate in the same scale the client used (percent if > 1 was sent).
+	respRate := p.CashbackRate
+	if req.CashbackRate > 1 {
+		respRate = p.CashbackRate * 100
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"id":            p.CustomerSisfiID,
+		"customer_id":   p.CustomerID,
+		"name":          p.Name,
+		"cashback_rate": respRate,
+		"active":        true,
+	})
+}
+
+func (h *APIHandler) updateProgram(c *gin.Context) {
+	customerSisfiID := c.Param("id")
+	var req struct {
+		Name         string  `json:"name" binding:"required"`
+		CashbackRate float64 `json:"cashback_rate" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.BadRequest("datos invalidos", err))
+		return
+	}
+	if err := h.service.UpdateProgram(c.Request.Context(), customerSisfiID, req.Name, req.CashbackRate); err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"id":            customerSisfiID,
+		"name":          req.Name,
+		"cashback_rate": req.CashbackRate,
+		"active":        true,
+	})
 }
 
 // --- Reward endpoints ---

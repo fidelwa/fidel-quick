@@ -242,6 +242,16 @@ export const completeOnboarding = () =>
 export const getPushcardConfig = (customerId: string) =>
   request<PushcardConfig>(`/pushcard/config?customer_id=${customerId}`)
 
+export const createPushcardProgram = (data: {
+  customer_id: string
+  name?: string
+  card_slots: number
+}) =>
+  request<PushcardConfig>(`/pushcard/programs`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+
 export const upsertPushcardConfig = (
   customerSisfiID: string,
   data: { card_slots: number; reward_on_complete?: string }

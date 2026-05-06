@@ -3,15 +3,14 @@ import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { renderWithProviders } from "@/test/test-utils"
 import { StepTeam } from "../step-team"
-import type { Collaborator } from "@/types"
-
-const mockFetch = vi.fn()
+import type { DraftCollaborator } from "@/lib/wizard-draft"
+import { emptyPendingCollaborator } from "@/lib/wizard-draft"
 
 beforeEach(() => {
-  vi.stubGlobal("fetch", mockFetch)
+  localStorage.clear()
   localStorage.setItem(
     "fidel_auth",
-    JSON.stringify({ token: "tok", customerId: "c1", email: "a@b.com" })
+    JSON.stringify({ token: "tok", customerId: "c1", email: "a@b.com" }),
   )
 })
 
@@ -20,106 +19,97 @@ afterEach(() => {
   localStorage.clear()
 })
 
-const mockCollaborator: Collaborator = {
-  id: "col1", customer_id: "c1", name: "Juan Perez",
-  phone: "+525512345678", hash_id: "abc", active: true,
+const mockCollab: DraftCollaborator = {
+  tempId: "t1",
+  name: "Juan Perez",
+  phone: "+525512345678",
 }
 
-const defaultProps = {
-  collaborators: [] as Collaborator[],
-  onCollaboratorsChange: vi.fn(),
+const baseProps = {
+  collaborators: [] as DraftCollaborator[],
+  pendingCollaborator: emptyPendingCollaborator,
+  onAddCollaborator: vi.fn(),
+  onRemoveCollaborator: vi.fn(),
+  onPendingCollaboratorChange: vi.fn(),
   onNext: vi.fn(),
   onPrev: vi.fn(),
 }
 
-describe("StepTeam", () => {
+describe("StepTeam (draft mode)", () => {
   it("renders title", () => {
-    renderWithProviders(<StepTeam {...defaultProps} />)
+    renderWithProviders(<StepTeam {...baseProps} />)
     expect(screen.getByText("Registra a tu equipo")).toBeInTheDocument()
   })
 
   it("shows WhatsApp notice", () => {
-    renderWithProviders(<StepTeam {...defaultProps} />)
+    renderWithProviders(<StepTeam {...baseProps} />)
     expect(screen.getByText(/WhatsApp activo/)).toBeInTheDocument()
   })
 
   it("shows empty state when no collaborators", () => {
-    renderWithProviders(<StepTeam {...defaultProps} />)
+    renderWithProviders(<StepTeam {...baseProps} />)
     expect(screen.getByText("Agrega a tu primer colaborador")).toBeInTheDocument()
   })
 
-  it("shows collaborator in table when collaborators exist", () => {
+  it("shows collaborator row when one exists", () => {
     renderWithProviders(
-      <StepTeam {...defaultProps} collaborators={[mockCollaborator]} />
+      <StepTeam {...baseProps} collaborators={[mockCollab]} />,
     )
     expect(screen.getByText("Juan Perez")).toBeInTheDocument()
     expect(screen.getByText("+525512345678")).toBeInTheDocument()
   })
 
-  it("shows multiple collaborators", () => {
-    const collab2: Collaborator = {
-      id: "col2", customer_id: "c1", name: "Maria Lopez",
-      phone: "+525598765432", hash_id: "def", active: true,
-    }
+  it("shows count when collaborators exist", () => {
     renderWithProviders(
-      <StepTeam {...defaultProps} collaborators={[mockCollaborator, collab2]} />
-    )
-    expect(screen.getByText("Juan Perez")).toBeInTheDocument()
-    expect(screen.getByText("Maria Lopez")).toBeInTheDocument()
-  })
-
-  it("shows collaborator count", () => {
-    renderWithProviders(
-      <StepTeam {...defaultProps} collaborators={[mockCollaborator]} />
+      <StepTeam {...baseProps} collaborators={[mockCollab]} />,
     )
     expect(screen.getByText(/1 colaborador registrado/)).toBeInTheDocument()
   })
 
-  it("has country code selector", () => {
-    renderWithProviders(<StepTeam {...defaultProps} />)
-    const select = screen.getByDisplayValue("MX (+52)")
-    expect(select).toBeInTheDocument()
-  })
-
-  it("has input fields for name and phone", () => {
-    renderWithProviders(<StepTeam {...defaultProps} />)
-    expect(screen.getByPlaceholderText("Juan Perez")).toBeInTheDocument()
-    expect(screen.getByPlaceholderText("5512345678")).toBeInTheDocument()
-  })
-
-  it("has navigation buttons", () => {
-    renderWithProviders(<StepTeam {...defaultProps} />)
-    expect(screen.getByRole("button", { name: "Anterior" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Siguiente" })).toBeInTheDocument()
-  })
-
-  it("has add button", () => {
-    renderWithProviders(<StepTeam {...defaultProps} />)
-    const buttons = screen.getAllByRole("button")
-    expect(buttons.length).toBeGreaterThanOrEqual(3) // prev + next + add
-  })
-
-  it("can type in name and phone fields", async () => {
+  it("Siguiente without collaborators is blocked", async () => {
     const user = userEvent.setup()
-    renderWithProviders(<StepTeam {...defaultProps} />)
-
-    const nameInput = screen.getByPlaceholderText("Juan Perez")
-    const phoneInput = screen.getByPlaceholderText("5512345678")
-
-    await user.type(nameInput, "Ana Garcia")
-    await user.type(phoneInput, "5511112222")
-
-    expect(nameInput).toHaveValue("Ana Garcia")
-    expect(phoneInput).toHaveValue("5511112222")
+    const onNext = vi.fn()
+    renderWithProviders(<StepTeam {...baseProps} onNext={onNext} />)
+    await user.click(screen.getByRole("button", { name: "Siguiente" }))
+    expect(onNext).not.toHaveBeenCalled()
   })
 
-  it("strips non-digit characters from phone input", async () => {
+  it("Siguiente with at least one collaborator advances", async () => {
     const user = userEvent.setup()
-    renderWithProviders(<StepTeam {...defaultProps} />)
+    const onNext = vi.fn()
+    renderWithProviders(
+      <StepTeam
+        {...baseProps}
+        collaborators={[mockCollab]}
+        onNext={onNext}
+      />,
+    )
+    await user.click(screen.getByRole("button", { name: "Siguiente" }))
+    expect(onNext).toHaveBeenCalled()
+  })
 
+  it("phone input onChange replaces non-digits before propagating", async () => {
+    const user = userEvent.setup()
+    const onPendingCollaboratorChange = vi.fn()
+    renderWithProviders(
+      <StepTeam
+        {...baseProps}
+        onPendingCollaboratorChange={onPendingCollaboratorChange}
+      />,
+    )
     const phoneInput = screen.getByPlaceholderText("5512345678")
-    await user.type(phoneInput, "55-1234-5678")
+    await user.type(phoneInput, "5")
+    // Verify the propagated phone value contains only digits.
+    const calls = onPendingCollaboratorChange.mock.calls
+    const lastCall = calls[calls.length - 1]?.[0]
+    expect(lastCall.phone).toMatch(/^\d*$/)
+  })
 
-    expect(phoneInput).toHaveValue("5512345678")
+  it("Anterior calls onPrev", async () => {
+    const user = userEvent.setup()
+    const onPrev = vi.fn()
+    renderWithProviders(<StepTeam {...baseProps} onPrev={onPrev} />)
+    await user.click(screen.getByRole("button", { name: "Anterior" }))
+    expect(onPrev).toHaveBeenCalled()
   })
 })

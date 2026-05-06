@@ -1,13 +1,11 @@
 import { useEffect, useRef } from "react"
 import { Navigate } from "react-router-dom"
 import { useAuth } from "@/context/auth-context"
-import { usePrograms } from "@/hooks/use-programs"
-import { useCashbackPrograms } from "@/hooks/use-cashback-programs"
-import { useCollaborators } from "@/hooks/use-collaborators"
-import { useRewards } from "@/hooks/use-rewards"
-import { useCashbackRewards } from "@/hooks/use-cashback-rewards"
 import { useOnboarding } from "@/hooks/use-onboarding"
-import { useOnboardingStatus, useUpdateOnboardingStep } from "@/hooks/use-onboarding-status"
+import {
+  useOnboardingStatus,
+  useUpdateOnboardingStep,
+} from "@/hooks/use-onboarding-status"
 import { StepIndicator } from "@/components/onboarding/step-indicator"
 import { StepTransition } from "@/components/onboarding/step-transition"
 import { StepProgram } from "./step-program"
@@ -18,84 +16,16 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 export function OnboardingLayout() {
   const { isAuthenticated, customerId } = useAuth()
-  const { data: onboardingStatus, isLoading: onboardingLoading } = useOnboardingStatus(isAuthenticated)
+  const { data: onboardingStatus, isLoading: onboardingLoading } =
+    useOnboardingStatus(isAuthenticated)
   const updateStep = useUpdateOnboardingStep()
-  const { data: programs } = usePrograms(customerId)
-  const { data: cashbackPrograms } = useCashbackPrograms(customerId)
-  const { data: existingCollaborators } = useCollaborators(customerId)
+  const onboarding = useOnboarding(customerId)
 
-  const earnBurnProgramFromServer = programs?.[0] ?? null
-  const cashbackProgramFromServer = cashbackPrograms?.[0] ?? null
-
-  const { data: existingRewards } = useRewards(earnBurnProgramFromServer?.id ?? "")
-  const { data: existingCbRewards } = useCashbackRewards(cashbackProgramFromServer?.id ?? "")
-
-  const onboarding = useOnboarding()
-  const recoveryDone = useRef(false)
-
-  // Reload recovery: sync server data into local state and jump to correct step
-  useEffect(() => {
-    if (recoveryDone.current) return
-    // Wait until base queries have resolved
-    if (programs === undefined || cashbackPrograms === undefined) return
-
-    // If there are programs, wait for their rewards to resolve too (sequential fetch)
-    if (earnBurnProgramFromServer && existingRewards === undefined) return
-    if (cashbackProgramFromServer && existingCbRewards === undefined) return
-
-    if (earnBurnProgramFromServer) {
-      onboarding.setEarnBurnProgram(earnBurnProgramFromServer)
-    }
-    if (cashbackProgramFromServer) {
-      onboarding.setCashbackProgram(cashbackProgramFromServer)
-    }
-    if (existingRewards?.length) {
-      onboarding.setRewards(existingRewards)
-    }
-    if (existingCbRewards?.length) {
-      onboarding.setCashbackRewards(existingCbRewards)
-    }
-    if (existingCollaborators?.length) {
-      onboarding.setCollaborators(existingCollaborators)
-    }
-
-    // Use server step if available, otherwise calculate from data
-    if (onboardingStatus?.current_step && onboardingStatus.current_step > 1) {
-      onboarding.goToStep(onboardingStatus.current_step)
-    } else {
-      const hasPrograms = (programs?.length ?? 0) > 0 || (cashbackPrograms?.length ?? 0) > 0
-      if (hasPrograms) {
-        const hasRewards = (existingRewards?.length ?? 0) > 0 || (existingCbRewards?.length ?? 0) > 0
-        if (hasRewards) {
-          const hasCollaborators = (existingCollaborators?.length ?? 0) > 0
-          if (hasCollaborators) {
-            onboarding.goToStep(4)
-          } else {
-            onboarding.goToStep(3)
-          }
-        } else {
-          onboarding.goToStep(2)
-        }
-      }
-    }
-
-    recoveryDone.current = true
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    programs,
-    cashbackPrograms,
-    earnBurnProgramFromServer?.id,
-    cashbackProgramFromServer?.id,
-    existingRewards,
-    existingCbRewards,
-    existingCollaborators,
-    onboardingStatus,
-  ])
-
-  // Persist step changes to server
+  // Persistir el paso actual en backend (sólo para retomar dispositivo
+  // distinto — el draft local guarda el resto de los datos).
   const prevStepRef = useRef(onboarding.currentStep)
   useEffect(() => {
-    if (onboarding.currentStep !== prevStepRef.current && recoveryDone.current) {
+    if (onboarding.currentStep !== prevStepRef.current) {
       prevStepRef.current = onboarding.currentStep
       updateStep.mutate(onboarding.currentStep)
     }
@@ -120,34 +50,35 @@ export function OnboardingLayout() {
     return <Navigate to="/" replace />
   }
 
+  // Un paso se marca como completado solo si el usuario ya lo dejó atrás.
+  // Si retrocede con "Anterior", el check del paso al que vuelve se quita.
   const completedSteps: number[] = []
-  if (onboarding.earnBurnProgram || onboarding.cashbackProgram) completedSteps.push(1)
-  if (onboarding.rewards.length > 0 || onboarding.cashbackRewards.length > 0) completedSteps.push(2)
-  if (onboarding.collaborators.length > 0) completedSteps.push(3)
+  for (let i = 1; i < onboarding.currentStep; i++) {
+    completedSteps.push(i)
+  }
 
   const renderStep = () => {
     switch (onboarding.currentStep) {
       case 1:
         return (
           <StepProgram
-            earnBurnProgram={onboarding.earnBurnProgram}
-            cashbackProgram={onboarding.cashbackProgram}
-            onEarnBurnCreated={onboarding.setEarnBurnProgram}
-            onCashbackCreated={onboarding.setCashbackProgram}
+            sisfi={onboarding.sisfi}
+            pendingProgramForm={onboarding.pendingProgramForm}
+            onSisfiChange={onboarding.setSisfi}
+            onPendingProgramFormChange={onboarding.setPendingProgramForm}
             onNext={onboarding.nextStep}
           />
         )
       case 2:
         return (
           <StepRewards
-            earnBurnProgram={onboarding.earnBurnProgram}
-            cashbackProgram={onboarding.cashbackProgram}
-            pushcardConfig={onboarding.pushcardConfig}
+            sisfi={onboarding.sisfi}
             rewards={onboarding.rewards}
-            cashbackRewards={onboarding.cashbackRewards}
-            onRewardsChange={onboarding.setRewards}
-            onCashbackRewardsChange={onboarding.setCashbackRewards}
-            onPushcardConfigChange={onboarding.setPushcardConfig}
+            pendingReward={onboarding.pendingReward}
+            onAddReward={onboarding.addReward}
+            onRemoveReward={onboarding.removeReward}
+            onSetRewards={onboarding.setRewards}
+            onPendingRewardChange={onboarding.setPendingReward}
             onNext={onboarding.nextStep}
             onPrev={onboarding.prevStep}
           />
@@ -156,7 +87,10 @@ export function OnboardingLayout() {
         return (
           <StepTeam
             collaborators={onboarding.collaborators}
-            onCollaboratorsChange={onboarding.setCollaborators}
+            pendingCollaborator={onboarding.pendingCollaborator}
+            onAddCollaborator={onboarding.addCollaborator}
+            onRemoveCollaborator={onboarding.removeCollaborator}
+            onPendingCollaboratorChange={onboarding.setPendingCollaborator}
             onNext={onboarding.nextStep}
             onPrev={onboarding.prevStep}
           />
@@ -164,10 +98,8 @@ export function OnboardingLayout() {
       case 4:
         return (
           <StepReady
-            earnBurnProgram={onboarding.earnBurnProgram}
-            cashbackProgram={onboarding.cashbackProgram}
+            sisfi={onboarding.sisfi}
             rewards={onboarding.rewards}
-            cashbackRewards={onboarding.cashbackRewards}
             collaborators={onboarding.collaborators}
             onPrev={onboarding.prevStep}
           />
@@ -179,12 +111,10 @@ export function OnboardingLayout() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      {/* Header */}
       <div className="border-b px-4 py-4">
         <h1 className="text-center text-lg font-bold">Fidel</h1>
       </div>
 
-      {/* Content */}
       <div className="flex flex-1 flex-col items-center px-4 py-8">
         <div className="w-full max-w-2xl space-y-8">
           <StepIndicator

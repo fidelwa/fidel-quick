@@ -57,6 +57,26 @@ func (f *fakeRepo) UpsertConfig(_ context.Context, cfg *Config) error {
 	return nil
 }
 
+func (f *fakeRepo) CreateProgram(_ context.Context, customerID, name string, cardSlots int) (*Config, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.configs {
+		if c.CustomerID == customerID {
+			return nil, ErrProgramAlreadyExists
+		}
+	}
+	id := "cs-pc-" + customerID
+	cfg := &Config{
+		CustomerSisfiID: id,
+		CustomerID:      customerID,
+		Name:            name,
+		CardSlots:       cardSlots,
+		Active:          true,
+	}
+	f.configs[id] = cfg
+	return cfg, nil
+}
+
 func (f *fakeRepo) GetOpenCard(_ context.Context, customerSisfiID, clientID string) (*Card, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

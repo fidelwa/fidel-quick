@@ -14,8 +14,9 @@ import (
 const CorrectionWindow = 2 * time.Hour
 
 var (
-	ErrConfigNotFound = errors.New("pushcard config no encontrado")
-	ErrNoStampToUndo  = errors.New("no hay sello reciente para deshacer")
+	ErrConfigNotFound       = errors.New("pushcard config no encontrado")
+	ErrNoStampToUndo        = errors.New("no hay sello reciente para deshacer")
+	ErrProgramAlreadyExists = errors.New("el negocio ya tiene un programa pushcard")
 )
 
 // Service implements pushcard business rules.
@@ -244,6 +245,35 @@ func (s *Service) ConfirmRedemption(ctx context.Context, code, collaboratorID st
 // GetConfig returns the active pushcard config for a customer.
 func (s *Service) GetConfig(ctx context.Context, customerID string) (*Config, error) {
 	return s.repo.GetConfig(ctx, customerID)
+}
+
+// CreateProgram activates the pushcard sisfi for a customer: creates the
+// customer_sisfi row and an initial pushcard_config (without reward) in one
+// transaction. The reward_on_complete is intentionally left null — the admin
+// assigns it later from the dedicated /pushcard page.
+//
+// Returns ErrProgramAlreadyExists if the customer already has a pushcard
+// customer_sisfi.
+func (s *Service) CreateProgram(ctx context.Context, customerID, name string, cardSlots int) (*Config, error) {
+	if customerID == "" {
+		return nil, fmt.Errorf("customer_id requerido")
+	}
+	if cardSlots <= 0 || cardSlots > 50 {
+		return nil, fmt.Errorf("card_slots debe estar entre 1 y 50")
+	}
+	if name == "" {
+		name = "Tarjeta de sellos"
+	}
+	cfg, err := s.repo.CreateProgram(ctx, customerID, name, cardSlots)
+	if err != nil {
+		return nil, err
+	}
+	s.log.Info("pushcard.program.created",
+		"customer_id", customerID,
+		"customer_sisfi_id", cfg.CustomerSisfiID,
+		"card_slots", cardSlots,
+	)
+	return cfg, nil
 }
 
 // UpsertConfig validates and persists the config.

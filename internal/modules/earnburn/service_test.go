@@ -146,6 +146,11 @@ func (m *mockRepo) ListPrograms(ctx context.Context, customerID string) ([]EarnB
 	return []EarnBurnProgram{{CustomerSisfiID: "cs-1", CustomerID: customerID}}, nil
 }
 
+func (m *mockRepo) CreateProgram(ctx context.Context, p *EarnBurnProgram) error { return nil }
+func (m *mockRepo) UpdateProgram(ctx context.Context, customerSisfiID, name string, pointsRatio int) error {
+	return nil
+}
+
 func (m *mockRepo) GetCustomer(ctx context.Context, id string) (*Customer, error) {
 	if m.getCustomerFn != nil {
 		return m.getCustomerFn(ctx, id)

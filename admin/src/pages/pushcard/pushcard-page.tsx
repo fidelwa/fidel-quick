@@ -114,10 +114,10 @@ export function PushcardPage() {
         <h1 className="text-2xl font-bold">Tarjeta de sellos</h1>
         <div className="rounded-lg border border-dashed p-8 text-center">
           <p className="text-muted-foreground">
-            Aún no activaste el sistema de tarjeta de sellos para este negocio.
+            Aún no activaste la tarjeta de sellos para este negocio.
           </p>
           <p className="text-muted-foreground mt-2 text-sm">
-            Activalo desde la sección de Programas seleccionando "pushcard" en el catálogo.
+            Activala desde el wizard de onboarding (paso "Elige tu programa de fidelidad").
           </p>
         </div>
       </div>

@@ -2,7 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { screen } from "@testing-library/react"
 import { renderWithProviders } from "@/test/test-utils"
 import { StepReady } from "../step-ready"
-import type { Program, CashbackProgram, Reward, CashbackReward, Collaborator } from "@/types"
+import type {
+  DraftSisfi,
+  DraftReward,
+  DraftCollaborator,
+} from "@/lib/wizard-draft"
 
 const mockFetch = vi.fn()
 
@@ -10,16 +14,19 @@ beforeEach(() => {
   vi.stubGlobal("fetch", mockFetch)
   localStorage.setItem(
     "fidel_auth",
-    JSON.stringify({ token: "tok", customerId: "c1", email: "a@b.com" })
+    JSON.stringify({ token: "tok", customerId: "c1", email: "a@b.com" }),
   )
-  // Mock getCustomer response
   mockFetch.mockResolvedValue({
     ok: true,
     status: 200,
-    json: () => Promise.resolve({
-      id: "c1", name: "Mi Negocio", slug: "mi-negocio",
-      onboarding_completed: false, active: true,
-    }),
+    json: () =>
+      Promise.resolve({
+        id: "c1",
+        name: "Mi Negocio",
+        slug: "mi-negocio",
+        onboarding_completed: false,
+        active: true,
+      }),
   })
 })
 
@@ -28,95 +35,62 @@ afterEach(() => {
   localStorage.clear()
 })
 
-const earnBurnProgram: Program = {
-  id: "p1", customer_id: "c1",
-  name: "Puntos", points_ratio: 100, active: true,
-}
+const earnSisfi: DraftSisfi = { type: "earn_burn", name: "Puntos", ratio: 15 }
+const cashbackSisfi: DraftSisfi = { type: "cashback", name: "Cashback 5%", rate: 5 }
+const pushcardSisfi: DraftSisfi = { type: "pushcard", name: "Sellos", slots: 10 }
 
-const cashbackProgram: CashbackProgram = {
-  id: "cb1", customer_id: "c1",
-  name: "Cashback 5%", cashback_rate: 5, active: true,
-}
-
-const rewards: Reward[] = [
-  { id: "r1", customer_id: "c1", customer_sisfi_id: "p1", name: "Cafe", description: "", points_cost: 100, active: true },
-  { id: "r2", customer_id: "c1", customer_sisfi_id: "p1", name: "Postre", description: "", points_cost: 200, active: true },
+const rewards: DraftReward[] = [
+  { tempId: "r1", name: "Cafe", description: "", cost: 100 },
+  { tempId: "r2", name: "Postre", description: "", cost: 200 },
 ]
 
-const cashbackRewards: CashbackReward[] = [
-  { id: "cr1", customer_id: "c1", customer_sisfi_id: "cb1", name: "Descuento", description: "", cost: 50, active: true },
+const collaborators: DraftCollaborator[] = [
+  { tempId: "t1", name: "Juan", phone: "+525512345678" },
 ]
 
-const collaborators: Collaborator[] = [
-  { id: "col1", customer_id: "c1", name: "Juan", phone: "+521", hash_id: "a", active: true },
-  { id: "col2", customer_id: "c1", name: "Ana", phone: "+522", hash_id: "b", active: true },
-]
-
-const defaultProps = {
-  earnBurnProgram,
-  cashbackProgram,
+const baseProps = {
+  sisfi: earnSisfi,
   rewards,
-  cashbackRewards,
   collaborators,
   onPrev: vi.fn(),
 }
 
-describe("StepReady", () => {
-  it("renders completion title", () => {
-    renderWithProviders(<StepReady {...defaultProps} />)
+describe("StepReady (draft mode)", () => {
+  it("renders header", () => {
+    renderWithProviders(<StepReady {...baseProps} />)
     expect(screen.getByText("¡Todo listo!")).toBeInTheDocument()
   })
 
-  it("shows program badges", () => {
-    renderWithProviders(<StepReady {...defaultProps} />)
+  it("shows the sisfi badge for earn_burn", () => {
+    renderWithProviders(<StepReady {...baseProps} sisfi={earnSisfi} />)
     expect(screen.getByText("Puntos")).toBeInTheDocument()
+  })
+
+  it("shows the sisfi badge for cashback", () => {
+    renderWithProviders(<StepReady {...baseProps} sisfi={cashbackSisfi} />)
     expect(screen.getByText("Cashback 5%")).toBeInTheDocument()
   })
 
-  it("shows correct reward count", () => {
-    renderWithProviders(<StepReady {...defaultProps} />)
-    // 2 earn-burn + 1 cashback = 3
-    expect(screen.getByText("3")).toBeInTheDocument()
-    expect(screen.getByText("Recompensas")).toBeInTheDocument()
+  it("shows the sisfi badge for pushcard", () => {
+    renderWithProviders(<StepReady {...baseProps} sisfi={pushcardSisfi} />)
+    expect(screen.getByText("Sellos")).toBeInTheDocument()
   })
 
-  it("shows correct collaborator count", () => {
-    renderWithProviders(<StepReady {...defaultProps} />)
-    expect(screen.getByText("2")).toBeInTheDocument()
-    expect(screen.getByText("Colaboradores")).toBeInTheDocument()
+  it("counts rewards and collaborators in summary", () => {
+    renderWithProviders(<StepReady {...baseProps} />)
+    expect(screen.getByText("2")).toBeInTheDocument() // rewards
+    expect(screen.getByText("1")).toBeInTheDocument() // collaborators
   })
 
-  it("renders QR download button", () => {
-    renderWithProviders(<StepReady {...defaultProps} />)
-    expect(screen.getByRole("button", { name: /Descargar QR/ })).toBeInTheDocument()
+  it("shows the Crear programa button", () => {
+    renderWithProviders(<StepReady {...baseProps} />)
+    expect(
+      screen.getByRole("button", { name: /Crear programa/ }),
+    ).toBeInTheDocument()
   })
 
-  it("renders copy URL button", () => {
-    renderWithProviders(<StepReady {...defaultProps} />)
-    expect(screen.getByRole("button", { name: /Copiar URL/ })).toBeInTheDocument()
-  })
-
-  it("renders finish button", () => {
-    renderWithProviders(<StepReady {...defaultProps} />)
-    expect(screen.getByRole("button", { name: "Ir al Dashboard" })).toBeInTheDocument()
-  })
-
-  it("renders previous button", () => {
-    renderWithProviders(<StepReady {...defaultProps} />)
+  it("Anterior button is present", () => {
+    renderWithProviders(<StepReady {...baseProps} />)
     expect(screen.getByRole("button", { name: "Anterior" })).toBeInTheDocument()
-  })
-
-  it("shows only earn-burn badge when no cashback", () => {
-    renderWithProviders(
-      <StepReady {...defaultProps} cashbackProgram={null} cashbackRewards={[]} />
-    )
-    expect(screen.getByText("Puntos")).toBeInTheDocument()
-    expect(screen.queryByText("Cashback 5%")).not.toBeInTheDocument()
-  })
-
-  it("displays join URL", () => {
-    renderWithProviders(<StepReady {...defaultProps} />)
-    // URL should contain fidel.app/unirse
-    expect(screen.getByText(/fidel\.app\/unirse/)).toBeInTheDocument()
   })
 })

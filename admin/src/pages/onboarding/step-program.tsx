@@ -1,119 +1,115 @@
-import { useState } from "react"
-import { useAuth } from "@/context/auth-context"
-import { useCreateProgram } from "@/hooks/use-programs"
-import { useCreateCashbackProgram } from "@/hooks/use-cashback-programs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
-import { Star, Wallet, Loader2 } from "lucide-react"
+import { Star, Wallet, Stamp } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Program, CashbackProgram } from "@/types"
+import type {
+  DraftSisfi,
+  PendingProgramForm,
+  SisfiType,
+} from "@/lib/wizard-draft"
 
 interface StepProgramProps {
-  earnBurnProgram: Program | null
-  cashbackProgram: CashbackProgram | null
-  onEarnBurnCreated: (program: Program | null) => void
-  onCashbackCreated: (program: CashbackProgram | null) => void
+  sisfi: DraftSisfi | null
+  pendingProgramForm: PendingProgramForm
+  onSisfiChange: (sisfi: DraftSisfi | null) => void
+  onPendingProgramFormChange: (form: PendingProgramForm) => void
   onNext: () => void
 }
 
 export function StepProgram({
-  earnBurnProgram,
-  cashbackProgram,
-  onEarnBurnCreated,
-  onCashbackCreated,
+  sisfi,
+  pendingProgramForm,
+  onSisfiChange,
+  onPendingProgramFormChange,
   onNext,
 }: StepProgramProps) {
-  const { customerId } = useAuth()
-  const createProgram = useCreateProgram()
-  const createCashbackProgram = useCreateCashbackProgram()
+  // Todos los inputs viven en `pendingProgramForm` para persistir en el draft.
+  const selected = pendingProgramForm.selected
+  const earnName = pendingProgramForm.earnName
+  const earnRatio = pendingProgramForm.earnRatio
+  const cashbackName = pendingProgramForm.cashbackName
+  const cashbackRate = pendingProgramForm.cashbackRate
+  const pushcardName = pendingProgramForm.pushcardName
+  const pushcardSlots = pendingProgramForm.pushcardSlots
 
-  const [earnSelected, setEarnSelected] = useState(!!earnBurnProgram)
-  const [cashbackSelected, setCashbackSelected] = useState(!!cashbackProgram)
+  const update = (patch: Partial<PendingProgramForm>) =>
+    onPendingProgramFormChange({ ...pendingProgramForm, ...patch })
 
-  const [earnName, setEarnName] = useState(earnBurnProgram?.name ?? "")
-  const [earnRatio, setEarnRatio] = useState(String(earnBurnProgram?.points_ratio ?? 15))
+  const setSelected = (next: SisfiType | null) => update({ selected: next })
+  const setEarnName = (v: string) => update({ earnName: v })
+  const setEarnRatio = (v: string) => update({ earnRatio: v })
+  const setCashbackName = (v: string) => update({ cashbackName: v })
+  const setCashbackRate = (v: string) => update({ cashbackRate: v })
+  const setPushcardName = (v: string) => update({ pushcardName: v })
+  const setPushcardSlots = (v: string) => update({ pushcardSlots: v })
 
-  const [cashbackName, setCashbackName] = useState(cashbackProgram?.name ?? "")
-  const [cashbackRate, setCashbackRate] = useState(String(cashbackProgram?.cashback_rate ?? 5))
 
-  const [saving, setSaving] = useState(false)
-
-  const handleNext = async () => {
-    if (!earnSelected && !cashbackSelected) {
-      toast.error("Selecciona al menos un tipo de programa")
+  const handleNext = () => {
+    if (!selected) {
+      toast.error("Selecciona un programa de fidelidad")
       return
     }
 
-    setSaving(true)
-    try {
-      if (earnSelected && !earnBurnProgram) {
-        if (!earnName.trim()) {
-          toast.error("Ingresa el nombre del programa de puntos")
-          setSaving(false)
-          return
-        }
-        const program = await createProgram.mutateAsync({
-          customer_id: customerId,
-          name: earnName.trim(),
-          points_ratio: Number(earnRatio) || 15,
-        })
-        onEarnBurnCreated(program)
+    if (selected === "earn_burn") {
+      if (!earnName.trim()) {
+        toast.error("Ingresa el nombre del programa de puntos")
+        return
       }
-
-      if (cashbackSelected && !cashbackProgram) {
-        if (!cashbackName.trim()) {
-          toast.error("Ingresa el nombre del programa de cashback")
-          setSaving(false)
-          return
-        }
-        const program = await createCashbackProgram.mutateAsync({
-          customer_id: customerId,
-          name: cashbackName.trim(),
-          cashback_rate: Number(cashbackRate) || 5,
-        })
-        onCashbackCreated(program)
+      onSisfiChange({
+        type: "earn_burn",
+        name: earnName.trim(),
+        ratio: Number(earnRatio) || 15,
+      })
+    } else if (selected === "cashback") {
+      if (!cashbackName.trim()) {
+        toast.error("Ingresa el nombre del programa de cashback")
+        return
       }
-
-      if (!earnSelected && earnBurnProgram) {
-        onEarnBurnCreated(null)
+      onSisfiChange({
+        type: "cashback",
+        name: cashbackName.trim(),
+        rate: Number(cashbackRate) || 5,
+      })
+    } else if (selected === "pushcard") {
+      const slots = Number(pushcardSlots)
+      if (!slots || slots < 1 || slots > 50) {
+        toast.error("Sellos por tarjeta debe estar entre 1 y 50")
+        return
       }
-      if (!cashbackSelected && cashbackProgram) {
-        onCashbackCreated(null)
-      }
-
-      onNext()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al crear programa")
-    } finally {
-      setSaving(false)
+      onSisfiChange({
+        type: "pushcard",
+        name: pushcardName.trim() || "Tarjeta de sellos",
+        slots,
+      })
     }
+
+    onNext()
+  }
+
+  const pickSelected = (type: SisfiType) => {
+    update({ selected: selected === type ? null : type })
   }
 
   return (
     <div className="space-y-6">
-      <div>
+      <div className="text-center">
         <h2 className="text-xl font-semibold">Elige tu programa de fidelidad</h2>
         <p className="text-sm text-muted-foreground">
           Selecciona el tipo de programa para tu negocio
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {/* Earn-Burn Card */}
+      <div className="grid gap-4 sm:grid-cols-3">
         <button
           type="button"
-          onClick={() => {
-            if (earnBurnProgram) return
-            setEarnSelected(!earnSelected)
-            if (!earnSelected) setCashbackSelected(false)
-          }}
+          onClick={() => pickSelected("earn_burn")}
           className={cn(
             "rounded-lg border-2 p-4 text-left transition-all duration-200",
-            earnSelected || earnBurnProgram
+            selected === "earn_burn"
               ? "border-primary bg-primary/5 shadow-sm"
-              : "border-border hover:border-primary/30"
+              : "border-border hover:border-primary/30",
           )}
         >
           <div className="flex items-center gap-3">
@@ -125,24 +121,16 @@ export function StepProgram({
               <p className="text-xs text-muted-foreground">Acumula y canjea puntos</p>
             </div>
           </div>
-          {earnBurnProgram && (
-            <p className="mt-2 text-xs text-green-600 font-medium">Creado</p>
-          )}
         </button>
 
-        {/* Cashback Card */}
         <button
           type="button"
-          onClick={() => {
-            if (cashbackProgram) return
-            setCashbackSelected(!cashbackSelected)
-            if (!cashbackSelected) setEarnSelected(false)
-          }}
+          onClick={() => pickSelected("cashback")}
           className={cn(
             "rounded-lg border-2 p-4 text-left transition-all duration-200",
-            cashbackSelected || cashbackProgram
+            selected === "cashback"
               ? "border-primary bg-primary/5 shadow-sm"
-              : "border-border hover:border-primary/30"
+              : "border-border hover:border-primary/30",
           )}
         >
           <div className="flex items-center gap-3">
@@ -154,17 +142,34 @@ export function StepProgram({
               <p className="text-xs text-muted-foreground">Porcentaje de devolucion</p>
             </div>
           </div>
-          {cashbackProgram && (
-            <p className="mt-2 text-xs text-green-600 font-medium">Creado</p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => pickSelected("pushcard")}
+          className={cn(
+            "rounded-lg border-2 p-4 text-left transition-all duration-200",
+            selected === "pushcard"
+              ? "border-primary bg-primary/5 shadow-sm"
+              : "border-border hover:border-primary/30",
           )}
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-100 text-purple-600">
+              <Stamp className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-medium">Tarjeta de sellos</p>
+              <p className="text-xs text-muted-foreground">Sellos hasta completar</p>
+            </div>
+          </div>
         </button>
       </div>
 
-      {/* Earn-Burn Config */}
       <div
         className={cn(
           "grid transition-all duration-200",
-          earnSelected || earnBurnProgram ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+          selected === "earn_burn" ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         )}
       >
         <div className="overflow-hidden">
@@ -178,7 +183,6 @@ export function StepProgram({
                   placeholder="Programa de puntos"
                   value={earnName}
                   onChange={(e) => setEarnName(e.target.value)}
-                  disabled={!!earnBurnProgram}
                 />
               </div>
               <div className="space-y-1.5">
@@ -189,24 +193,25 @@ export function StepProgram({
                   min={1}
                   value={earnRatio}
                   onChange={(e) => setEarnRatio(e.target.value)}
-                  disabled={!!earnBurnProgram}
                 />
               </div>
             </div>
             {Number(earnRatio) > 0 && (
               <p className="text-xs text-muted-foreground">
-                Ejemplo: compra de $150 = <span className="font-semibold text-foreground">{Math.floor(150 / Number(earnRatio)).toLocaleString()} puntos</span>
+                Ejemplo: compra de $150 ={" "}
+                <span className="font-semibold text-foreground">
+                  {Math.floor(150 / Number(earnRatio)).toLocaleString()} puntos
+                </span>
               </p>
             )}
           </div>
         </div>
       </div>
 
-      {/* Cashback Config */}
       <div
         className={cn(
           "grid transition-all duration-200",
-          cashbackSelected || cashbackProgram ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+          selected === "cashback" ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         )}
       >
         <div className="overflow-hidden">
@@ -220,7 +225,6 @@ export function StepProgram({
                   placeholder="Programa de cashback"
                   value={cashbackName}
                   onChange={(e) => setCashbackName(e.target.value)}
-                  disabled={!!cashbackProgram}
                 />
               </div>
               <div className="space-y-1.5">
@@ -231,8 +235,7 @@ export function StepProgram({
                   min={1}
                   max={100}
                   value={cashbackRate}
-                  onChange={(e) => setCashbackRate(Number(e.target.value))}
-                  disabled={!!cashbackProgram}
+                  onChange={(e) => setCashbackRate(e.target.value)}
                 />
               </div>
             </div>
@@ -240,17 +243,47 @@ export function StepProgram({
         </div>
       </div>
 
+      <div
+        className={cn(
+          "grid transition-all duration-200",
+          selected === "pushcard" ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        )}
+      >
+        <div className="overflow-hidden">
+          <div className="space-y-3 pt-2">
+            <h3 className="text-sm font-medium">Configurar tarjeta de sellos</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="pushcard-name">Nombre del programa</Label>
+                <Input
+                  id="pushcard-name"
+                  placeholder="Tarjeta de sellos"
+                  value={pushcardName}
+                  onChange={(e) => setPushcardName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pushcard-slots">Sellos por tarjeta</Label>
+                <Input
+                  id="pushcard-slots"
+                  type="number"
+                  min={1}
+                  max={50}
+                  step={1}
+                  value={pushcardSlots}
+                  onChange={(e) => setPushcardSlots(e.target.value)}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              La recompensa al completar la tarjeta se asigna en el siguiente paso.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="flex justify-end">
-        <Button onClick={handleNext} disabled={saving}>
-          {saving ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Guardando...
-            </>
-          ) : (
-            "Siguiente"
-          )}
-        </Button>
+        <Button onClick={handleNext}>Siguiente</Button>
       </div>
     </div>
   )

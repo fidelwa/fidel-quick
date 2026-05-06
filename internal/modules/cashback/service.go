@@ -349,6 +349,49 @@ func (s *Service) ListPrograms(ctx context.Context, customerID string) ([]Cashba
 	return programs, nil
 }
 
+// CreateProgram activates cashback for a customer. Accepts cashback_rate either as
+// a percentage (e.g. 5 for 5%) or as a fraction (e.g. 0.05); both are normalized to
+// the fraction stored in config_cashback (DECIMAL(5,4) CHECK > 0 AND <= 1).
+func (s *Service) CreateProgram(ctx context.Context, p *CashbackProgram) error {
+	if p.CustomerID == "" || p.Name == "" || p.CashbackRate <= 0 {
+		return apperror.BadRequest("customer_id, name y cashback_rate (>0) son requeridos", nil)
+	}
+	if p.CashbackRate > 1 {
+		p.CashbackRate = p.CashbackRate / 100
+	}
+	if p.CashbackRate > 1 || p.CashbackRate <= 0 {
+		return apperror.BadRequest("cashback_rate debe estar entre 0 y 1 (o entre 0 y 100 si es porcentaje)", nil)
+	}
+	if err := s.repo.CreateProgram(ctx, p); err != nil {
+		return apperror.Internal("error al crear programa cashback", err)
+	}
+	return nil
+}
+
+// UpdateProgram updates name + cashback_rate. Accepts the rate either as a
+// percentage (5 for 5%) or as a fraction (0.05); both normalize to fraction.
+func (s *Service) UpdateProgram(ctx context.Context, customerSisfiID, name string, rate float64) error {
+	if customerSisfiID == "" {
+		return apperror.BadRequest("id requerido", nil)
+	}
+	if name == "" || rate <= 0 {
+		return apperror.BadRequest("name y cashback_rate (>0) son requeridos", nil)
+	}
+	if rate > 1 {
+		rate = rate / 100
+	}
+	if rate > 1 || rate <= 0 {
+		return apperror.BadRequest("cashback_rate debe estar entre 0 y 1 (o entre 0 y 100 si es porcentaje)", nil)
+	}
+	if err := s.repo.UpdateProgram(ctx, customerSisfiID, name, rate); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apperror.NotFound("programa no encontrado", err)
+		}
+		return apperror.Internal("error al actualizar programa cashback", err)
+	}
+	return nil
+}
+
 func (s *Service) ListAllRewards(ctx context.Context, customerSisfiID string) ([]CashbackReward, error) {
 	rewards, err := s.repo.ListAllRewards(ctx, customerSisfiID)
 	if err != nil {

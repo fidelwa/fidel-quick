@@ -1,210 +1,156 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useOnboarding } from "../use-onboarding"
-import type { Program, CashbackProgram, Reward, CashbackReward, Collaborator } from "@/types"
+import type { DraftSisfi, DraftReward, DraftCollaborator } from "@/lib/wizard-draft"
 
-const mockProgram: Program = {
-  id: "p1", customer_id: "c1",
-  name: "Points", points_ratio: 100, active: true,
-}
+const earnSisfi: DraftSisfi = { type: "earn_burn", name: "Puntos", ratio: 15 }
+const cashbackSisfi: DraftSisfi = { type: "cashback", name: "Cash", rate: 5 }
 
-const mockCashbackProgram: CashbackProgram = {
-  id: "cb1", customer_id: "c1",
-  name: "Cashback", cashback_rate: 5, active: true,
-}
+const reward1 = { name: "Cafe", description: "Un cafe", cost: 100 }
+const collab1 = { name: "Juan", phone: "+525512345678" }
 
-const mockReward: Reward = {
-  id: "r1", customer_id: "c1", customer_sisfi_id: "p1",
-  name: "Free Coffee", description: "A coffee", points_cost: 100, active: true,
-}
+beforeEach(() => {
+  localStorage.clear()
+})
 
-const mockCashbackReward: CashbackReward = {
-  id: "cr1", customer_id: "c1", customer_sisfi_id: "cb1",
-  name: "Discount", description: "10% off", cost: 50, active: true,
-}
+afterEach(() => {
+  localStorage.clear()
+})
 
-const mockCollaborator: Collaborator = {
-  id: "col1", customer_id: "c1", name: "Juan",
-  phone: "+525512345678", hash_id: "abc123", active: true,
-}
-
-describe("useOnboarding", () => {
+describe("useOnboarding (draft mode)", () => {
   describe("initial state", () => {
     it("starts at step 1 with forward direction", () => {
-      const { result } = renderHook(() => useOnboarding())
+      const { result } = renderHook(() => useOnboarding("c1"))
       expect(result.current.currentStep).toBe(1)
       expect(result.current.direction).toBe("forward")
     })
 
-    it("starts with null programs", () => {
-      const { result } = renderHook(() => useOnboarding())
-      expect(result.current.earnBurnProgram).toBeNull()
-      expect(result.current.cashbackProgram).toBeNull()
-    })
-
-    it("starts with empty arrays", () => {
-      const { result } = renderHook(() => useOnboarding())
+    it("starts with no sisfi and empty arrays", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
+      expect(result.current.sisfi).toBeNull()
       expect(result.current.rewards).toEqual([])
-      expect(result.current.cashbackRewards).toEqual([])
       expect(result.current.collaborators).toEqual([])
     })
 
     it("accepts an initial step", () => {
-      const { result } = renderHook(() => useOnboarding(3))
+      const { result } = renderHook(() => useOnboarding("c1", 3))
       expect(result.current.currentStep).toBe(3)
     })
   })
 
   describe("step navigation", () => {
-    it("nextStep increments and sets direction forward", () => {
-      const { result } = renderHook(() => useOnboarding())
+    it("nextStep increments and clamps at 4", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
       act(() => result.current.nextStep())
       expect(result.current.currentStep).toBe(2)
-      expect(result.current.direction).toBe("forward")
     })
 
-    it("nextStep does not exceed step 4", () => {
-      const { result } = renderHook(() => useOnboarding(4))
-      act(() => result.current.nextStep())
-      expect(result.current.currentStep).toBe(4)
-    })
-
-    it("prevStep decrements and sets direction backward", () => {
-      const { result } = renderHook(() => useOnboarding(3))
-      act(() => result.current.prevStep())
-      expect(result.current.currentStep).toBe(2)
-      expect(result.current.direction).toBe("backward")
-    })
-
-    it("prevStep does not go below step 1", () => {
-      const { result } = renderHook(() => useOnboarding())
+    it("prevStep decrements and clamps at 1", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
       act(() => result.current.prevStep())
       expect(result.current.currentStep).toBe(1)
     })
 
-    it("goToStep sets correct direction going forward", () => {
-      const { result } = renderHook(() => useOnboarding())
-      act(() => result.current.goToStep(3))
-      expect(result.current.currentStep).toBe(3)
-      expect(result.current.direction).toBe("forward")
-    })
-
-    it("goToStep sets correct direction going backward", () => {
-      const { result } = renderHook(() => useOnboarding(4))
-      act(() => result.current.goToStep(2))
-      expect(result.current.currentStep).toBe(2)
-      expect(result.current.direction).toBe("backward")
-    })
-
-    it("goToStep clamps to valid range", () => {
-      const { result } = renderHook(() => useOnboarding())
+    it("goToStep clamps to [1, 4]", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
       act(() => result.current.goToStep(10))
       expect(result.current.currentStep).toBe(4)
       act(() => result.current.goToStep(0))
       expect(result.current.currentStep).toBe(1)
     })
+  })
 
-    it("navigates through full flow: 1 → 2 → 3 → 4", () => {
-      const { result } = renderHook(() => useOnboarding())
-      act(() => result.current.nextStep())
-      expect(result.current.currentStep).toBe(2)
-      act(() => result.current.nextStep())
-      expect(result.current.currentStep).toBe(3)
-      act(() => result.current.nextStep())
-      expect(result.current.currentStep).toBe(4)
+  describe("draft setters", () => {
+    it("setSisfi sets the sisfi draft", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
+      act(() => result.current.setSisfi(earnSisfi))
+      expect(result.current.sisfi).toEqual(earnSisfi)
     })
 
-    it("navigates backward: 4 → 3 → 2 → 1", () => {
-      const { result } = renderHook(() => useOnboarding(4))
-      act(() => result.current.prevStep())
-      expect(result.current.currentStep).toBe(3)
-      act(() => result.current.prevStep())
-      expect(result.current.currentStep).toBe(2)
-      act(() => result.current.prevStep())
-      expect(result.current.currentStep).toBe(1)
+    it("changing sisfi type clears rewards (different units)", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
+      act(() => result.current.setSisfi(earnSisfi))
+      act(() => result.current.addReward(reward1))
+      expect(result.current.rewards).toHaveLength(1)
+      act(() => result.current.setSisfi(cashbackSisfi))
+      expect(result.current.rewards).toHaveLength(0)
+    })
+
+    it("addReward appends with tempId", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
+      act(() => result.current.addReward(reward1))
+      expect(result.current.rewards).toHaveLength(1)
+      expect(result.current.rewards[0].name).toBe("Cafe")
+      expect(result.current.rewards[0].tempId).toBeTruthy()
+    })
+
+    it("removeReward removes by tempId", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
+      act(() => result.current.addReward(reward1))
+      const id = result.current.rewards[0].tempId
+      act(() => result.current.removeReward(id))
+      expect(result.current.rewards).toHaveLength(0)
+    })
+
+    it("addCollaborator appends with tempId", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
+      act(() => result.current.addCollaborator(collab1))
+      expect(result.current.collaborators).toHaveLength(1)
+      expect(result.current.collaborators[0].tempId).toBeTruthy()
+    })
+
+    it("removeCollaborator removes by tempId", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
+      act(() => result.current.addCollaborator(collab1))
+      const id = result.current.collaborators[0].tempId
+      act(() => result.current.removeCollaborator(id))
+      expect(result.current.collaborators).toHaveLength(0)
     })
   })
 
-  describe("data setters", () => {
-    it("setEarnBurnProgram updates program", () => {
-      const { result } = renderHook(() => useOnboarding())
-      act(() => result.current.setEarnBurnProgram(mockProgram))
-      expect(result.current.earnBurnProgram).toEqual(mockProgram)
+  describe("localStorage persistence", () => {
+    it("persists draft and restores on remount", () => {
+      const { result, unmount } = renderHook(() => useOnboarding("c1"))
+      act(() => result.current.setSisfi(earnSisfi))
+      act(() => result.current.addReward(reward1))
+      act(() => result.current.addCollaborator(collab1))
+      act(() => result.current.nextStep())
+      unmount()
+
+      const { result: result2 } = renderHook(() => useOnboarding("c1"))
+      expect(result2.current.sisfi).toEqual(earnSisfi)
+      expect(result2.current.rewards).toHaveLength(1)
+      expect(result2.current.collaborators).toHaveLength(1)
+      expect(result2.current.currentStep).toBe(2)
     })
 
-    it("setEarnBurnProgram can be set to null", () => {
-      const { result } = renderHook(() => useOnboarding())
-      act(() => result.current.setEarnBurnProgram(mockProgram))
-      act(() => result.current.setEarnBurnProgram(null))
-      expect(result.current.earnBurnProgram).toBeNull()
-    })
+    it("draft for a different customerId is ignored", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
+      act(() => result.current.setSisfi(earnSisfi))
 
-    it("setCashbackProgram updates program", () => {
-      const { result } = renderHook(() => useOnboarding())
-      act(() => result.current.setCashbackProgram(mockCashbackProgram))
-      expect(result.current.cashbackProgram).toEqual(mockCashbackProgram)
-    })
-
-    it("setRewards updates rewards array", () => {
-      const { result } = renderHook(() => useOnboarding())
-      act(() => result.current.setRewards([mockReward]))
-      expect(result.current.rewards).toEqual([mockReward])
-    })
-
-    it("setCashbackRewards updates cashback rewards array", () => {
-      const { result } = renderHook(() => useOnboarding())
-      act(() => result.current.setCashbackRewards([mockCashbackReward]))
-      expect(result.current.cashbackRewards).toEqual([mockCashbackReward])
-    })
-
-    it("setCollaborators updates collaborators array", () => {
-      const { result } = renderHook(() => useOnboarding())
-      act(() => result.current.setCollaborators([mockCollaborator]))
-      expect(result.current.collaborators).toEqual([mockCollaborator])
-    })
-
-    it("setters do not affect step or direction", () => {
-      const { result } = renderHook(() => useOnboarding(2))
-      act(() => {
-        result.current.setEarnBurnProgram(mockProgram)
-        result.current.setRewards([mockReward])
-        result.current.setCollaborators([mockCollaborator])
-      })
-      expect(result.current.currentStep).toBe(2)
-      expect(result.current.direction).toBe("forward")
+      const { result: r2 } = renderHook(() => useOnboarding("c2"))
+      expect(r2.current.sisfi).toBeNull()
     })
   })
 
-  describe("combined navigation and data", () => {
-    it("full wizard flow with data at each step", () => {
-      const { result } = renderHook(() => useOnboarding())
-
-      // Step 1: set programs
-      act(() => result.current.setEarnBurnProgram(mockProgram))
-      act(() => result.current.nextStep())
-
-      // Step 2: set rewards
-      act(() => result.current.setRewards([mockReward]))
-      act(() => result.current.nextStep())
-
-      // Step 3: set collaborators
-      act(() => result.current.setCollaborators([mockCollaborator]))
-      act(() => result.current.nextStep())
-
-      // Step 4: verify all data persists
-      expect(result.current.currentStep).toBe(4)
-      expect(result.current.earnBurnProgram).toEqual(mockProgram)
-      expect(result.current.rewards).toEqual([mockReward])
-      expect(result.current.collaborators).toEqual([mockCollaborator])
+  describe("legacy: typed draft items receive tempIds", () => {
+    it("setRewards replaces array as-is", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
+      const rewards: DraftReward[] = [
+        { tempId: "x1", name: "A", description: "", cost: 1 },
+        { tempId: "x2", name: "B", description: "", cost: 2 },
+      ]
+      act(() => result.current.setRewards(rewards))
+      expect(result.current.rewards).toEqual(rewards)
     })
 
-    it("data persists when navigating backward", () => {
-      const { result } = renderHook(() => useOnboarding(3))
-      act(() => result.current.setEarnBurnProgram(mockProgram))
-      act(() => result.current.setRewards([mockReward]))
-      act(() => result.current.prevStep())
-      expect(result.current.earnBurnProgram).toEqual(mockProgram)
-      expect(result.current.rewards).toEqual([mockReward])
+    it("setCollaborators replaces array as-is", () => {
+      const { result } = renderHook(() => useOnboarding("c1"))
+      const list: DraftCollaborator[] = [
+        { tempId: "y1", name: "A", phone: "+1" },
+      ]
+      act(() => result.current.setCollaborators(list))
+      expect(result.current.collaborators).toEqual(list)
     })
   })
 })

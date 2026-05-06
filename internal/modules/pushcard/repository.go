@@ -15,6 +15,11 @@ type Repository interface {
 	GetConfig(ctx context.Context, customerID string) (*Config, error)
 	GetConfigByID(ctx context.Context, customerSisfiID string) (*Config, error)
 	UpsertConfig(ctx context.Context, cfg *Config) error
+	// CreateProgram inserts a new customer_sisfi (sisfi='pushcard') and an
+	// initial pushcard_config in a single transaction. Returns the created
+	// config. ErrProgramAlreadyExists is returned if the customer already
+	// has a pushcard customer_sisfi (active or not).
+	CreateProgram(ctx context.Context, customerID, name string, cardSlots int) (*Config, error)
 
 	GetOpenCard(ctx context.Context, customerSisfiID, clientID string) (*Card, error)
 	GetCard(ctx context.Context, cardID string) (*Card, error)
@@ -75,6 +80,54 @@ func (r *PostgresRepository) GetConfigByID(ctx context.Context, customerSisfiID 
 	}
 	c.RewardOnComplete = rewardID.String
 	return &c, nil
+}
+
+// CreateProgram inserts (or reactivates) a pushcard customer_sisfi + ensures
+// pushcard_config exists. Idempotent: on a (customer_id, sisfi_id='pushcard')
+// conflict, reactivates and updates name + card_slots — useful for users that
+// deactivated pushcard from the wizard and want to re-enable it.
+func (r *PostgresRepository) CreateProgram(ctx context.Context, customerID, name string, cardSlots int) (*Config, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var (
+		customerSisfiID string
+		active          bool
+	)
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO customer_sisfi (customer_id, sisfi_id, name, active)
+		VALUES ($1, 'pushcard', $2, true)
+		ON CONFLICT (customer_id, sisfi_id) DO UPDATE
+		SET name = EXCLUDED.name, active = true, updated_at = NOW()
+		RETURNING id, active
+	`, customerID, name).Scan(&customerSisfiID, &active)
+	if err != nil {
+		return nil, fmt.Errorf("upsert customer_sisfi: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO pushcard_config (customer_sisfi_id, card_slots, reward_on_complete)
+		VALUES ($1, $2, NULL)
+		ON CONFLICT (customer_sisfi_id) DO UPDATE
+		SET card_slots = EXCLUDED.card_slots, updated_at = NOW()
+	`, customerSisfiID, cardSlots); err != nil {
+		return nil, fmt.Errorf("upsert pushcard_config: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+
+	return &Config{
+		CustomerSisfiID: customerSisfiID,
+		CustomerID:      customerID,
+		Name:            name,
+		CardSlots:       cardSlots,
+		Active:          active,
+	}, nil
 }
 
 func (r *PostgresRepository) UpsertConfig(ctx context.Context, cfg *Config) error {

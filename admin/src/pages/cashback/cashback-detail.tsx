@@ -97,7 +97,7 @@ export function CashbackDetailPage() {
   const onCreateReward = (values: RewardFormValues) => {
     createReward.mutate(values, {
       onSuccess: () => {
-        toast.success("Beneficio creado")
+        toast.success("Recompensa creada")
         rewardForm.reset()
         setRewardDialogOpen(false)
       },
@@ -107,7 +107,7 @@ export function CashbackDetailPage() {
 
   const onToggleReward = (rewardId: string, active: boolean) => {
     updateReward.mutate({ rewardId, active }, {
-      onSuccess: () => toast.success(active ? "Beneficio activado" : "Beneficio desactivado"),
+      onSuccess: () => toast.success(active ? "Recompensa activada" : "Recompensa desactivada"),
       onError: (err) => toast.error(err.message),
     })
   }
@@ -195,17 +195,17 @@ export function CashbackDetailPage() {
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Beneficios</h2>
+          <h2 className="text-xl font-semibold">Recompensas</h2>
           <Dialog open={rewardDialogOpen} onOpenChange={setRewardDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline">
                 <Plus className="mr-2 h-4 w-4" />
-                Nuevo beneficio
+                Nueva recompensa
               </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Crear beneficio</DialogTitle>
+                <DialogTitle>Crear recompensa</DialogTitle>
               </DialogHeader>
               <Form {...rewardForm}>
                 <form onSubmit={rewardForm.handleSubmit(onCreateReward)} className="space-y-4">
@@ -265,7 +265,7 @@ export function CashbackDetailPage() {
           </div>
         ) : !rewards?.length ? (
           <div className="rounded-lg border border-dashed p-8 text-center">
-            <p className="text-muted-foreground">No hay beneficios. Crea el primero.</p>
+            <p className="text-muted-foreground">No hay recompensas. Crea la primera.</p>
           </div>
         ) : (
           <Table>

@@ -13,6 +13,8 @@ type Repository interface {
 	GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error)
 	GetProgramByID(ctx context.Context, customerSisfiID string) (*EarnBurnProgram, error)
 	ListPrograms(ctx context.Context, customerID string) ([]EarnBurnProgram, error)
+	CreateProgram(ctx context.Context, p *EarnBurnProgram) error
+	UpdateProgram(ctx context.Context, customerSisfiID, name string, pointsRatio int) error
 	GetBalance(ctx context.Context, clientID, customerSisfiID string) (int, error)
 	UpsertBalance(ctx context.Context, clientID, customerSisfiID string, delta int) (int, error)
 	CreateTransaction(ctx context.Context, tx *Transaction) error
@@ -76,6 +78,76 @@ func (r *PostgresRepository) GetProgram(ctx context.Context, customerID string) 
 		return nil, fmt.Errorf("get program: %w", err)
 	}
 	return &p, nil
+}
+
+// CreateProgram activates earn_burn for a customer. Idempotent: if the customer
+// already has an earn_burn customer_sisfi (active or inactive), it is reactivated
+// and its name + points_ratio updated. Sets p.CustomerSisfiID on success.
+func (r *PostgresRepository) CreateProgram(ctx context.Context, p *EarnBurnProgram) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var customerSisfiID string
+	if err := tx.QueryRowContext(ctx, `
+		INSERT INTO customer_sisfi (customer_id, sisfi_id, name, active)
+		VALUES ($1, 'earn_burn', $2, true)
+		ON CONFLICT (customer_id, sisfi_id) DO UPDATE
+		SET name = EXCLUDED.name, active = true, updated_at = NOW()
+		RETURNING id
+	`, p.CustomerID, p.Name).Scan(&customerSisfiID); err != nil {
+		return fmt.Errorf("upsert customer_sisfi: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO config_earnburn (customer_sisfi_id, points_ratio)
+		VALUES ($1, $2)
+		ON CONFLICT (customer_sisfi_id) DO UPDATE
+		SET points_ratio = EXCLUDED.points_ratio, updated_at = NOW()
+	`, customerSisfiID, p.PointsRatio); err != nil {
+		return fmt.Errorf("upsert config_earnburn: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	p.CustomerSisfiID = customerSisfiID
+	p.Active = true
+	return nil
+}
+
+// UpdateProgram updates the program's name (in customer_sisfi) and points_ratio
+// (in config_earnburn) atomically. Returns sql.ErrNoRows if the program doesn't exist.
+func (r *PostgresRepository) UpdateProgram(ctx context.Context, customerSisfiID, name string, pointsRatio int) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE customer_sisfi SET name = $1, updated_at = NOW()
+		 WHERE id = $2 AND sisfi_id = 'earn_burn'`,
+		name, customerSisfiID,
+	)
+	if err != nil {
+		return fmt.Errorf("update customer_sisfi: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE config_earnburn SET points_ratio = $1, updated_at = NOW()
+		 WHERE customer_sisfi_id = $2`,
+		pointsRatio, customerSisfiID,
+	); err != nil {
+		return fmt.Errorf("update config_earnburn: %w", err)
+	}
+	return tx.Commit()
 }
 
 func (r *PostgresRepository) GetProgramByID(ctx context.Context, customerSisfiID string) (*EarnBurnProgram, error) {

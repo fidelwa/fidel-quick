@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   getPushcardConfig,
+  createPushcardProgram,
   upsertPushcardConfig,
   getPushcardCards,
 } from "@/lib/api-client"
@@ -11,6 +12,17 @@ export function usePushcardConfig(customerId: string) {
     queryFn: () => getPushcardConfig(customerId),
     enabled: !!customerId,
     retry: false, // 404 if no config yet
+  })
+}
+
+export function useCreatePushcardProgram() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: { customer_id: string; name?: string; card_slots: number }) =>
+      createPushcardProgram(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pushcard-config"] })
+    },
   })
 }
 
