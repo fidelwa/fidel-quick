@@ -15,8 +15,9 @@ type Repository interface {
 	Create(admin *Admin) error
 	CreateCustomer(name, slug, phone, description string) (customerID string, err error)
 	SlugExists(slug string) (bool, error)
-	LinkGoogle(adminID, sub, email string) error
+	LinkGoogle(adminID string, profile *GoogleProfile) error
 	UnlinkGoogle(adminID string) error
+	UpdateGoogleProfile(adminID string, profile *GoogleProfile) error
 }
 
 type PostgresRepository struct {
@@ -27,22 +28,26 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-const adminColumns = `id, customer_id, email, password_hash, google_sub, google_email, active, created_at, updated_at`
+const adminColumns = `id, customer_id, email, password_hash,
+	google_sub, google_email, full_name, avatar_url, locale, hosted_domain,
+	active, created_at, updated_at`
 
 func scanAdmin(row interface{ Scan(...any) error }) (*Admin, error) {
 	var a Admin
-	var sub, gemail sql.NullString
-	if err := row.Scan(&a.ID, &a.CustomerID, &a.Email, &a.PasswordHash, &sub, &gemail, &a.Active, &a.CreatedAt, &a.UpdatedAt); err != nil {
+	var sub, gemail, fullName, avatarURL, locale, hd sql.NullString
+	if err := row.Scan(
+		&a.ID, &a.CustomerID, &a.Email, &a.PasswordHash,
+		&sub, &gemail, &fullName, &avatarURL, &locale, &hd,
+		&a.Active, &a.CreatedAt, &a.UpdatedAt,
+	); err != nil {
 		return nil, err
 	}
-	if sub.Valid {
-		v := sub.String
-		a.GoogleSub = &v
-	}
-	if gemail.Valid {
-		v := gemail.String
-		a.GoogleEmail = &v
-	}
+	a.GoogleSub = nullableToPtr(sub)
+	a.GoogleEmail = nullableToPtr(gemail)
+	a.FullName = nullableToPtr(fullName)
+	a.AvatarURL = nullableToPtr(avatarURL)
+	a.Locale = nullableToPtr(locale)
+	a.HostedDomain = nullableToPtr(hd)
 	return &a, nil
 }
 
@@ -93,11 +98,14 @@ func (r *PostgresRepository) GetByGoogleSub(sub string) (*Admin, error) {
 
 func (r *PostgresRepository) Create(admin *Admin) error {
 	err := r.db.QueryRow(
-		`INSERT INTO admins (customer_id, email, password_hash, google_sub, google_email)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO admins (customer_id, email, password_hash,
+			google_sub, google_email, full_name, avatar_url, locale, hosted_domain)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 RETURNING id, created_at, updated_at`,
 		admin.CustomerID, admin.Email, admin.PasswordHash,
 		nullableString(admin.GoogleSub), nullableString(admin.GoogleEmail),
+		nullableString(admin.FullName), nullableString(admin.AvatarURL),
+		nullableString(admin.Locale), nullableString(admin.HostedDomain),
 	).Scan(&admin.ID, &admin.CreatedAt, &admin.UpdatedAt)
 
 	if err != nil {
@@ -128,11 +136,23 @@ func (r *PostgresRepository) SlugExists(slug string) (bool, error) {
 	return exists, err
 }
 
-func (r *PostgresRepository) LinkGoogle(adminID, sub, email string) error {
+// LinkGoogle stores the full Google profile (sub + email + name + picture + ...)
+// against the admin. Used both for first-time linking and for refreshing the
+// profile on subsequent logins (Google may rotate picture URLs / change name).
+func (r *PostgresRepository) LinkGoogle(adminID string, profile *GoogleProfile) error {
 	res, err := r.db.Exec(
-		`UPDATE admins SET google_sub = $1, google_email = $2, updated_at = NOW()
-		 WHERE id = $3`,
-		sub, email, adminID,
+		`UPDATE admins SET
+			google_sub = $1,
+			google_email = $2,
+			full_name = COALESCE(NULLIF($3, ''), full_name),
+			avatar_url = COALESCE(NULLIF($4, ''), avatar_url),
+			locale = COALESCE(NULLIF($5, ''), locale),
+			hosted_domain = COALESCE(NULLIF($6, ''), hosted_domain),
+			updated_at = NOW()
+		 WHERE id = $7`,
+		profile.Sub, profile.Email,
+		profile.FullName, profile.Picture, profile.Locale, profile.HostedDomain,
+		adminID,
 	)
 	if err != nil {
 		if isDuplicateKeyError(err) {
@@ -147,9 +167,37 @@ func (r *PostgresRepository) LinkGoogle(adminID, sub, email string) error {
 	return nil
 }
 
-func (r *PostgresRepository) UnlinkGoogle(adminID string) error {
+// UpdateGoogleProfile refreshes the cached Google profile fields without
+// touching google_sub or google_email. Called on every successful Google login
+// to keep the avatar / name fresh.
+func (r *PostgresRepository) UpdateGoogleProfile(adminID string, profile *GoogleProfile) error {
 	res, err := r.db.Exec(
-		`UPDATE admins SET google_sub = NULL, google_email = NULL, updated_at = NOW()
+		`UPDATE admins SET
+			full_name = COALESCE(NULLIF($1, ''), full_name),
+			avatar_url = COALESCE(NULLIF($2, ''), avatar_url),
+			locale = COALESCE(NULLIF($3, ''), locale),
+			hosted_domain = COALESCE(NULLIF($4, ''), hosted_domain),
+			updated_at = NOW()
+		 WHERE id = $5`,
+		profile.FullName, profile.Picture, profile.Locale, profile.HostedDomain,
+		adminID,
+	)
+	if err != nil {
+		return apperror.Internal("failed to update google profile", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return apperror.NotFound("admin not found", nil)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) UnlinkGoogle(adminID string) error {
+	// Limpiamos solo identificadores de vinculación; full_name/avatar_url/locale
+	// quedan como datos del usuario (puede borrarlos manualmente desde el panel
+	// si lo agregamos como feature).
+	res, err := r.db.Exec(
+		`UPDATE admins SET google_sub = NULL, google_email = NULL, hosted_domain = NULL, updated_at = NOW()
 		 WHERE id = $1`,
 		adminID,
 	)
@@ -168,6 +216,14 @@ func nullableString(s *string) interface{} {
 		return nil
 	}
 	return *s
+}
+
+func nullableToPtr(s sql.NullString) *string {
+	if !s.Valid {
+		return nil
+	}
+	v := s.String
+	return &v
 }
 
 func isDuplicateKeyError(err error) bool {

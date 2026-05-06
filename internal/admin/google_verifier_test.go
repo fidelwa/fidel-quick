@@ -81,7 +81,7 @@ func goodClaims(aud string) jwt.MapClaims {
 
 func TestVerifier_ClientIDEmpty_Fails(t *testing.T) {
 	v := NewGoogleVerifier("")
-	_, _, err := v.Verify("any")
+	_, err := v.Verify("any")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not configured")
 }
@@ -91,10 +91,47 @@ func TestVerifier_Success(t *testing.T) {
 	v := newTestVerifier(idp, "my-client-id")
 
 	tok := idp.sign(t, goodClaims("my-client-id"))
-	email, sub, err := v.Verify(tok)
+	profile, err := v.Verify(tok)
 	require.NoError(t, err)
-	assert.Equal(t, "user@example.com", email)
-	assert.Equal(t, "google-sub-123", sub)
+	assert.Equal(t, "user@example.com", profile.Email)
+	assert.Equal(t, "google-sub-123", profile.Sub)
+}
+
+func TestVerifier_PopulatesProfileFields(t *testing.T) {
+	idp := newFakeIdP(t)
+	v := newTestVerifier(idp, "my-client-id")
+
+	claims := goodClaims("my-client-id")
+	claims["name"] = "Luis Bolivar"
+	claims["given_name"] = "Luis"
+	claims["family_name"] = "Bolivar"
+	claims["picture"] = "https://lh3.googleusercontent.com/a/abc"
+	claims["locale"] = "es"
+	claims["hd"] = "corvex.ai"
+
+	tok := idp.sign(t, claims)
+	profile, err := v.Verify(tok)
+	require.NoError(t, err)
+	assert.Equal(t, "Luis Bolivar", profile.FullName)
+	assert.Equal(t, "Luis", profile.GivenName)
+	assert.Equal(t, "Bolivar", profile.FamilyName)
+	assert.Equal(t, "https://lh3.googleusercontent.com/a/abc", profile.Picture)
+	assert.Equal(t, "es", profile.Locale)
+	assert.Equal(t, "corvex.ai", profile.HostedDomain)
+}
+
+func TestVerifier_NoProfileScopeIsOK(t *testing.T) {
+	// Tokens emitted with only `openid email` scope (no profile) won't have
+	// name/picture/locale claims. Verifier must still succeed.
+	idp := newFakeIdP(t)
+	v := newTestVerifier(idp, "my-client-id")
+
+	tok := idp.sign(t, goodClaims("my-client-id"))
+	profile, err := v.Verify(tok)
+	require.NoError(t, err)
+	assert.Empty(t, profile.FullName)
+	assert.Empty(t, profile.Picture)
+	assert.Empty(t, profile.HostedDomain)
 }
 
 func TestVerifier_AlternateIssuer(t *testing.T) {
@@ -104,7 +141,7 @@ func TestVerifier_AlternateIssuer(t *testing.T) {
 	claims := goodClaims("my-client-id")
 	claims["iss"] = "accounts.google.com"
 	tok := idp.sign(t, claims)
-	_, _, err := v.Verify(tok)
+	_, err := v.Verify(tok)
 	require.NoError(t, err)
 }
 
@@ -113,7 +150,7 @@ func TestVerifier_AudienceMismatch(t *testing.T) {
 	v := newTestVerifier(idp, "my-client-id")
 
 	tok := idp.sign(t, goodClaims("other-client-id"))
-	_, _, err := v.Verify(tok)
+	_, err := v.Verify(tok)
 	require.Error(t, err)
 }
 
@@ -124,7 +161,7 @@ func TestVerifier_EmailNotVerified(t *testing.T) {
 	claims := goodClaims("my-client-id")
 	claims["email_verified"] = false
 	tok := idp.sign(t, claims)
-	_, _, err := v.Verify(tok)
+	_, err := v.Verify(tok)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "email not verified")
 }
@@ -136,7 +173,7 @@ func TestVerifier_Expired(t *testing.T) {
 	claims := goodClaims("my-client-id")
 	claims["exp"] = time.Now().Add(-10 * time.Minute).Unix()
 	tok := idp.sign(t, claims)
-	_, _, err := v.Verify(tok)
+	_, err := v.Verify(tok)
 	require.Error(t, err)
 }
 
@@ -147,7 +184,7 @@ func TestVerifier_BadIssuer(t *testing.T) {
 	claims := goodClaims("my-client-id")
 	claims["iss"] = "https://evil.example.com"
 	tok := idp.sign(t, claims)
-	_, _, err := v.Verify(tok)
+	_, err := v.Verify(tok)
 	require.Error(t, err)
 }
 
@@ -160,7 +197,7 @@ func TestVerifier_UnknownKid(t *testing.T) {
 	signed, err := tok.SignedString(idp.priv)
 	require.NoError(t, err)
 
-	_, _, err = v.Verify(signed)
+	_, err = v.Verify(signed)
 	require.Error(t, err)
 }
 
@@ -175,7 +212,7 @@ func TestVerifier_DifferentSigningKey(t *testing.T) {
 	signed, err := tok.SignedString(other)
 	require.NoError(t, err)
 
-	_, _, err = v.Verify(signed)
+	_, err = v.Verify(signed)
 	require.Error(t, err)
 }
 
@@ -188,7 +225,7 @@ func TestVerifier_HS256Rejected(t *testing.T) {
 	signed, err := tok.SignedString([]byte("shared-secret"))
 	require.NoError(t, err)
 
-	_, _, err = v.Verify(signed)
+	_, err = v.Verify(signed)
 	require.Error(t, err)
 }
 
@@ -199,7 +236,7 @@ func TestVerifier_MissingSub(t *testing.T) {
 	claims := goodClaims("my-client-id")
 	delete(claims, "sub")
 	tok := idp.sign(t, claims)
-	_, _, err := v.Verify(tok)
+	_, err := v.Verify(tok)
 	require.Error(t, err)
 }
 
@@ -209,7 +246,7 @@ func TestVerifier_KeyRotation(t *testing.T) {
 
 	// Warm cache with current kid.
 	tok := idp.sign(t, goodClaims("my-client-id"))
-	_, _, err := v.Verify(tok)
+	_, err := v.Verify(tok)
 	require.NoError(t, err)
 
 	// Rotate: new key + new kid.
@@ -218,7 +255,7 @@ func TestVerifier_KeyRotation(t *testing.T) {
 	idp.kid = "test-kid-2"
 
 	tok2 := idp.sign(t, goodClaims("my-client-id"))
-	_, _, err = v.Verify(tok2)
+	_, err = v.Verify(tok2)
 	require.NoError(t, err, "verifier should refresh JWKS when kid is unknown")
 }
 
@@ -234,14 +271,14 @@ func TestVerifier_JWKSUnreachable(t *testing.T) {
 	tok.Header["kid"] = "any"
 	signed, _ := tok.SignedString(priv)
 
-	_, _, err := v.Verify(signed)
+	_, err := v.Verify(signed)
 	require.Error(t, err)
 }
 
 func TestVerifier_MalformedToken(t *testing.T) {
 	idp := newFakeIdP(t)
 	v := newTestVerifier(idp, "my-client-id")
-	_, _, err := v.Verify("not-a-jwt")
+	_, err := v.Verify("not-a-jwt")
 	require.Error(t, err)
 }
 

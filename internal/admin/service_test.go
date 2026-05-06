@@ -13,14 +13,15 @@ import (
 // --- Mock Repository ---
 
 type mockRepo struct {
-	getByEmailFn     func(email string) (*Admin, error)
-	getByIDFn        func(id string) (*Admin, error)
-	getByGoogleSubFn func(sub string) (*Admin, error)
-	createFn         func(admin *Admin) error
-	createCustomerFn func(name, slug, phone, description string) (string, error)
-	slugExistsFn     func(slug string) (bool, error)
-	linkGoogleFn     func(adminID, sub, email string) error
-	unlinkGoogleFn   func(adminID string) error
+	getByEmailFn          func(email string) (*Admin, error)
+	getByIDFn             func(id string) (*Admin, error)
+	getByGoogleSubFn      func(sub string) (*Admin, error)
+	createFn              func(admin *Admin) error
+	createCustomerFn      func(name, slug, phone, description string) (string, error)
+	slugExistsFn          func(slug string) (bool, error)
+	linkGoogleFn          func(adminID string, profile *GoogleProfile) error
+	unlinkGoogleFn        func(adminID string) error
+	updateGoogleProfileFn func(adminID string, profile *GoogleProfile) error
 }
 
 func (m *mockRepo) GetByEmail(email string) (*Admin, error) {
@@ -66,9 +67,9 @@ func (m *mockRepo) SlugExists(slug string) (bool, error) {
 	return false, nil
 }
 
-func (m *mockRepo) LinkGoogle(adminID, sub, email string) error {
+func (m *mockRepo) LinkGoogle(adminID string, profile *GoogleProfile) error {
 	if m.linkGoogleFn != nil {
-		return m.linkGoogleFn(adminID, sub, email)
+		return m.linkGoogleFn(adminID, profile)
 	}
 	return nil
 }
@@ -80,16 +81,27 @@ func (m *mockRepo) UnlinkGoogle(adminID string) error {
 	return nil
 }
 
+func (m *mockRepo) UpdateGoogleProfile(adminID string, profile *GoogleProfile) error {
+	if m.updateGoogleProfileFn != nil {
+		return m.updateGoogleProfileFn(adminID, profile)
+	}
+	return nil
+}
+
 // --- Mock Google verifier ---
 
 type mockVerifier struct {
-	email string
-	sub   string
-	err   error
+	profile *GoogleProfile
+	err     error
 }
 
-func (m *mockVerifier) Verify(_ string) (string, string, error) {
-	return m.email, m.sub, m.err
+func (m *mockVerifier) Verify(_ string) (*GoogleProfile, error) {
+	return m.profile, m.err
+}
+
+// helper to build a profile in tests.
+func tprofile(email, sub string) *GoogleProfile {
+	return &GoogleProfile{Email: email, Sub: sub, EmailVerified: true}
 }
 
 func strPtr(s string) *string { return &s }
@@ -221,7 +233,7 @@ func TestGoogleLogin_ExistingSub(t *testing.T) {
 			return &Admin{ID: "a-1", Email: "user@gmail.com", CustomerID: "c-1", GoogleSub: &sub}, nil
 		},
 	}
-	svc := NewService(repo, "secret", &mockVerifier{email: "user@gmail.com", sub: "g-123"})
+	svc := NewService(repo, "secret", &mockVerifier{profile: tprofile("user@gmail.com", "g-123")})
 	resp, err := svc.GoogleLogin("token")
 	require.NoError(t, err)
 	assert.Equal(t, "a-1", resp.Admin.ID)
@@ -236,15 +248,15 @@ func TestGoogleLogin_FallbackToEmailLinks(t *testing.T) {
 		getByEmailFn: func(email string) (*Admin, error) {
 			return &Admin{ID: "a-1", Email: email, CustomerID: "c-1"}, nil
 		},
-		linkGoogleFn: func(adminID, sub, email string) error {
+		linkGoogleFn: func(adminID string, profile *GoogleProfile) error {
 			linked = true
 			assert.Equal(t, "a-1", adminID)
-			assert.Equal(t, "g-123", sub)
-			assert.Equal(t, "user@gmail.com", email)
+			assert.Equal(t, "g-123", profile.Sub)
+			assert.Equal(t, "user@gmail.com", profile.Email)
 			return nil
 		},
 	}
-	svc := NewService(repo, "secret", &mockVerifier{email: "user@gmail.com", sub: "g-123"})
+	svc := NewService(repo, "secret", &mockVerifier{profile: tprofile("user@gmail.com", "g-123")})
 	resp, err := svc.GoogleLogin("token")
 	require.NoError(t, err)
 	assert.True(t, linked, "expected auto-link on first Google login")
@@ -260,7 +272,7 @@ func TestGoogleLogin_UserNotFound(t *testing.T) {
 			return nil, apperror.NotFound("admin not found", nil)
 		},
 	}
-	svc := NewService(repo, "secret", &mockVerifier{email: "user@gmail.com", sub: "g-1"})
+	svc := NewService(repo, "secret", &mockVerifier{profile: tprofile("user@gmail.com", "g-1")})
 	_, err := svc.GoogleLogin("token")
 	require.Error(t, err)
 }
@@ -279,7 +291,7 @@ func TestGoogleOnboard_Success(t *testing.T) {
 			return "cust-new", nil
 		},
 	}
-	svc := NewService(repo, "secret", &mockVerifier{email: "owner@gmail.com", sub: "g-7"})
+	svc := NewService(repo, "secret", &mockVerifier{profile: tprofile("owner@gmail.com", "g-7")})
 	req := GoogleOnboardingRequest{GoogleToken: "tok", Name: "Mi Cafe", Phone: "+5215555"}
 	resp, err := svc.GoogleOnboard(req)
 	require.NoError(t, err)
@@ -311,7 +323,7 @@ func TestGoogleOnboard_DuplicateEmail(t *testing.T) {
 			return "cust-new", nil
 		},
 	}
-	svc := NewService(repo, "secret", &mockVerifier{email: "dup@gmail.com", sub: "g-1"})
+	svc := NewService(repo, "secret", &mockVerifier{profile: tprofile("dup@gmail.com", "g-1")})
 	_, err := svc.GoogleOnboard(GoogleOnboardingRequest{GoogleToken: "tok", Name: "X", Phone: "p"})
 	require.Error(t, err)
 }
@@ -327,7 +339,7 @@ func TestLinkGoogle_Success(t *testing.T) {
 			return &Admin{ID: id, Email: "admin@x.com", CustomerID: "c", GoogleSub: strPtr("g-1"), GoogleEmail: strPtr("admin@gmail.com")}, nil
 		},
 	}
-	svc := NewService(repo, "secret", &mockVerifier{email: "admin@gmail.com", sub: "g-1"})
+	svc := NewService(repo, "secret", &mockVerifier{profile: tprofile("admin@gmail.com", "g-1")})
 	a, err := svc.LinkGoogle("a-1", "tok")
 	require.NoError(t, err)
 	require.NotNil(t, a.GoogleEmail)
@@ -340,7 +352,7 @@ func TestLinkGoogle_AlreadyLinkedToOtherAdmin(t *testing.T) {
 			return &Admin{ID: "other-admin"}, nil
 		},
 	}
-	svc := NewService(repo, "secret", &mockVerifier{email: "x@y.com", sub: "g-1"})
+	svc := NewService(repo, "secret", &mockVerifier{profile: tprofile("x@y.com", "g-1")})
 	_, err := svc.LinkGoogle("a-1", "tok")
 	require.Error(t, err)
 	var appErr *apperror.AppError
@@ -357,7 +369,7 @@ func TestLinkGoogle_SameAdminIdempotent(t *testing.T) {
 			return &Admin{ID: id, Email: "x@y.com", CustomerID: "c"}, nil
 		},
 	}
-	svc := NewService(repo, "secret", &mockVerifier{email: "x@y.com", sub: "g-1"})
+	svc := NewService(repo, "secret", &mockVerifier{profile: tprofile("x@y.com", "g-1")})
 	_, err := svc.LinkGoogle("a-1", "tok")
 	require.NoError(t, err)
 }

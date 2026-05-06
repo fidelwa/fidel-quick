@@ -134,12 +134,7 @@ func (h *APIHandler) LinkGoogle(c *gin.Context) {
 		c.Error(toAppError(err)) //nolint:errcheck
 		return
 	}
-	c.JSON(http.StatusOK, AdminSummary{
-		ID:          admin.ID,
-		Email:       admin.Email,
-		CustomerID:  admin.CustomerID,
-		GoogleEmail: admin.GoogleEmail,
-	})
+	c.JSON(http.StatusOK, adminToSummary(admin))
 }
 
 // UnlinkGoogle remueve la vinculación con Google del admin del JWT actual.
@@ -154,12 +149,7 @@ func (h *APIHandler) UnlinkGoogle(c *gin.Context) {
 		c.Error(toAppError(err)) //nolint:errcheck
 		return
 	}
-	c.JSON(http.StatusOK, AdminSummary{
-		ID:          admin.ID,
-		Email:       admin.Email,
-		CustomerID:  admin.CustomerID,
-		GoogleEmail: admin.GoogleEmail,
-	})
+	c.JSON(http.StatusOK, adminToSummary(admin))
 }
 
 // Me devuelve el admin del JWT actual (incluye estado de vinculación con Google).
@@ -174,12 +164,20 @@ func (h *APIHandler) Me(c *gin.Context) {
 		c.Error(toAppError(err)) //nolint:errcheck
 		return
 	}
-	c.JSON(http.StatusOK, AdminSummary{
-		ID:          admin.ID,
-		Email:       admin.Email,
-		CustomerID:  admin.CustomerID,
-		GoogleEmail: admin.GoogleEmail,
-	})
+	c.JSON(http.StatusOK, adminToSummary(admin))
+}
+
+func adminToSummary(a *Admin) AdminSummary {
+	return AdminSummary{
+		ID:           a.ID,
+		Email:        a.Email,
+		CustomerID:   a.CustomerID,
+		GoogleEmail:  a.GoogleEmail,
+		FullName:     a.FullName,
+		AvatarURL:    a.AvatarURL,
+		Locale:       a.Locale,
+		HostedDomain: a.HostedDomain,
+	}
 }
 
 func currentAdminID(c *gin.Context) (string, bool) {

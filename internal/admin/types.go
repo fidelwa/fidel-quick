@@ -9,6 +9,10 @@ type Admin struct {
 	PasswordHash string    `json:"-"`
 	GoogleSub    *string   `json:"-"`
 	GoogleEmail  *string   `json:"google_email,omitempty"`
+	FullName     *string   `json:"full_name,omitempty"`
+	AvatarURL    *string   `json:"avatar_url,omitempty"`
+	Locale       *string   `json:"locale,omitempty"`
+	HostedDomain *string   `json:"hosted_domain,omitempty"`
 	Active       bool      `json:"active"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -39,10 +43,14 @@ type AuthResponse struct {
 }
 
 type AdminSummary struct {
-	ID          string  `json:"id"`
-	Email       string  `json:"email"`
-	CustomerID  string  `json:"customer_id"`
-	GoogleEmail *string `json:"google_email,omitempty"`
+	ID           string  `json:"id"`
+	Email        string  `json:"email"`
+	CustomerID   string  `json:"customer_id"`
+	GoogleEmail  *string `json:"google_email,omitempty"`
+	FullName     *string `json:"full_name,omitempty"`
+	AvatarURL    *string `json:"avatar_url,omitempty"`
+	Locale       *string `json:"locale,omitempty"`
+	HostedDomain *string `json:"hosted_domain,omitempty"`
 }
 
 type GoogleOnboardingRequest struct {

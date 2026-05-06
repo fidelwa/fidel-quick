@@ -67,25 +67,36 @@ func (s *Service) GoogleLogin(googleToken string) (*AuthResponse, error) {
 	if s.verifier == nil {
 		return nil, apperror.BadRequest("google login not configured", nil)
 	}
-	email, sub, err := s.verifier.Verify(googleToken)
+	profile, err := s.verifier.Verify(googleToken)
 	if err != nil {
 		return nil, err
 	}
 
 	// Resolve by sub first; fall back to email and auto-link if found.
-	admin, err := s.repo.GetByGoogleSub(sub)
+	admin, err := s.repo.GetByGoogleSub(profile.Sub)
 	if err != nil {
-		admin, err = s.repo.GetByEmail(email)
+		admin, err = s.repo.GetByEmail(profile.Email)
 		if err != nil {
 			return nil, err
 		}
-		if err := s.repo.LinkGoogle(admin.ID, sub, email); err != nil {
+		if err := s.repo.LinkGoogle(admin.ID, profile); err != nil {
 			return nil, err
 		}
-		v := sub
-		admin.GoogleSub = &v
-		ge := email
-		admin.GoogleEmail = &ge
+		// Re-fetch to get the canonical state with profile fields populated.
+		admin, err = s.repo.GetByID(admin.ID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Sub already linked — refresh the cached profile (avatar/name may
+		// have changed in Google).
+		if err := s.repo.UpdateGoogleProfile(admin.ID, profile); err != nil {
+			return nil, err
+		}
+		admin, err = s.repo.GetByID(admin.ID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return s.makeAuthResponse(admin)
@@ -95,7 +106,7 @@ func (s *Service) GoogleOnboard(req GoogleOnboardingRequest) (*AuthResponse, err
 	if s.verifier == nil {
 		return nil, apperror.BadRequest("google login not configured", nil)
 	}
-	email, sub, err := s.verifier.Verify(req.GoogleToken)
+	profile, err := s.verifier.Verify(req.GoogleToken)
 	if err != nil {
 		return nil, err
 	}
@@ -120,14 +131,16 @@ func (s *Service) GoogleOnboard(req GoogleOnboardingRequest) (*AuthResponse, err
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	subCopy := sub
-	emailCopy := email
 	admin := &Admin{
 		CustomerID:   customerID,
-		Email:        email,
+		Email:        profile.Email,
 		PasswordHash: string(hash),
-		GoogleSub:    &subCopy,
-		GoogleEmail:  &emailCopy,
+		GoogleSub:    strPtrIf(profile.Sub),
+		GoogleEmail:  strPtrIf(profile.Email),
+		FullName:     strPtrIf(profile.FullName),
+		AvatarURL:    strPtrIf(profile.Picture),
+		Locale:       strPtrIf(profile.Locale),
+		HostedDomain: strPtrIf(profile.HostedDomain),
 		Active:       true,
 	}
 
@@ -138,6 +151,15 @@ func (s *Service) GoogleOnboard(req GoogleOnboardingRequest) (*AuthResponse, err
 	return s.makeAuthResponse(admin)
 }
 
+// strPtrIf returns nil for empty strings, &s otherwise. Avoids storing
+// empty strings as non-NULL values for optional Google profile fields.
+func strPtrIf(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // LinkGoogle associates the Google identity in googleToken to the admin
 // identified by adminID. Fails with 409 if the Google sub is already linked
 // to a different admin.
@@ -145,17 +167,17 @@ func (s *Service) LinkGoogle(adminID, googleToken string) (*Admin, error) {
 	if s.verifier == nil {
 		return nil, apperror.BadRequest("google login not configured", nil)
 	}
-	email, sub, err := s.verifier.Verify(googleToken)
+	profile, err := s.verifier.Verify(googleToken)
 	if err != nil {
 		return nil, err
 	}
 
 	// Reject if the sub is already linked to another admin.
-	if existing, err := s.repo.GetByGoogleSub(sub); err == nil && existing.ID != adminID {
+	if existing, err := s.repo.GetByGoogleSub(profile.Sub); err == nil && existing.ID != adminID {
 		return nil, apperror.Conflict("google account already linked to another admin", nil)
 	}
 
-	if err := s.repo.LinkGoogle(adminID, sub, email); err != nil {
+	if err := s.repo.LinkGoogle(adminID, profile); err != nil {
 		return nil, err
 	}
 	return s.repo.GetByID(adminID)
@@ -190,10 +212,14 @@ func (s *Service) makeAuthResponse(admin *Admin) (*AuthResponse, error) {
 	return &AuthResponse{
 		Token: token,
 		Admin: AdminSummary{
-			ID:          admin.ID,
-			Email:       admin.Email,
-			CustomerID:  admin.CustomerID,
-			GoogleEmail: admin.GoogleEmail,
+			ID:           admin.ID,
+			Email:        admin.Email,
+			CustomerID:   admin.CustomerID,
+			GoogleEmail:  admin.GoogleEmail,
+			FullName:     admin.FullName,
+			AvatarURL:    admin.AvatarURL,
+			Locale:       admin.Locale,
+			HostedDomain: admin.HostedDomain,
 		},
 	}, nil
 }
