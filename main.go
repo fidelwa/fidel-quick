@@ -136,9 +136,16 @@ func main() {
 		log,
 	)
 
-	// Admin auth
+	// Admin auth (Google verifier uses JWKS — nil verifier disables Google flows)
 	adminRepo := admin.NewPostgresRepository(database)
-	adminService := admin.NewService(adminRepo, cfg.JWTSecret, cfg.GoogleClientID)
+	var googleVerifier admin.GoogleVerifier
+	if cfg.GoogleClientID != "" {
+		googleVerifier = admin.NewGoogleVerifier(cfg.GoogleClientID)
+		log.Info("google auth enabled", "client_id_suffix", lastN(cfg.GoogleClientID, 12))
+	} else {
+		log.Warn("GOOGLE_CLIENT_ID not set — Google login/signup disabled")
+	}
+	adminService := admin.NewService(adminRepo, cfg.JWTSecret, googleVerifier)
 	adminAPI := admin.NewAPIHandler(adminService)
 
 	// Onboarding
@@ -202,4 +209,11 @@ func stripEndpoint(endpoint string) string {
 	endpoint = strings.TrimPrefix(endpoint, "http://")
 	endpoint = strings.TrimPrefix(endpoint, "https://")
 	return endpoint
+}
+
+func lastN(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
 }

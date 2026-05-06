@@ -2,30 +2,31 @@ package admin
 
 import (
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/theluisbolivar/fidel-quick/internal/apperror"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/text/unicode/norm"
 )
 
 type Service struct {
-	repo           Repository
-	jwtSecret      []byte
-	googleClientID string
+	repo      Repository
+	jwtSecret []byte
+	verifier  GoogleVerifier
 }
 
-func NewService(repo Repository, jwtSecret, googleClientID string) *Service {
+// NewService wires the repository, JWT signing secret, and Google verifier.
+// Pass a nil verifier to disable Google login/signup/linking — the corresponding
+// service methods will then return a "google login not configured" error.
+func NewService(repo Repository, jwtSecret string, verifier GoogleVerifier) *Service {
 	return &Service{
-		repo:           repo,
-		jwtSecret:      []byte(jwtSecret),
-		googleClientID: googleClientID,
+		repo:      repo,
+		jwtSecret: []byte(jwtSecret),
+		verifier:  verifier,
 	}
 }
 
@@ -39,19 +40,7 @@ func (s *Service) Login(email, password string) (*AuthResponse, error) {
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
-	token, err := s.generateJWT(admin)
-	if err != nil {
-		return nil, err
-	}
-
-	return &AuthResponse{
-		Token: token,
-		Admin: AdminSummary{
-			ID:         admin.ID,
-			Email:      admin.Email,
-			CustomerID: admin.CustomerID,
-		},
-	}, nil
+	return s.makeAuthResponse(admin)
 }
 
 func (s *Service) Register(email, password, customerID string) (*AuthResponse, error) {
@@ -71,49 +60,42 @@ func (s *Service) Register(email, password, customerID string) (*AuthResponse, e
 		return nil, err
 	}
 
-	token, err := s.generateJWT(admin)
-	if err != nil {
-		return nil, err
-	}
-
-	return &AuthResponse{
-		Token: token,
-		Admin: AdminSummary{
-			ID:         admin.ID,
-			Email:      admin.Email,
-			CustomerID: admin.CustomerID,
-		},
-	}, nil
+	return s.makeAuthResponse(admin)
 }
 
 func (s *Service) GoogleLogin(googleToken string) (*AuthResponse, error) {
-	email, err := s.verifyGoogleToken(googleToken)
+	if s.verifier == nil {
+		return nil, apperror.BadRequest("google login not configured", nil)
+	}
+	email, sub, err := s.verifier.Verify(googleToken)
 	if err != nil {
 		return nil, err
 	}
 
-	admin, err := s.repo.GetByEmail(email)
+	// Resolve by sub first; fall back to email and auto-link if found.
+	admin, err := s.repo.GetByGoogleSub(sub)
 	if err != nil {
-		return nil, err
+		admin, err = s.repo.GetByEmail(email)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.repo.LinkGoogle(admin.ID, sub, email); err != nil {
+			return nil, err
+		}
+		v := sub
+		admin.GoogleSub = &v
+		ge := email
+		admin.GoogleEmail = &ge
 	}
 
-	token, err := s.generateJWT(admin)
-	if err != nil {
-		return nil, err
-	}
-
-	return &AuthResponse{
-		Token: token,
-		Admin: AdminSummary{
-			ID:         admin.ID,
-			Email:      admin.Email,
-			CustomerID: admin.CustomerID,
-		},
-	}, nil
+	return s.makeAuthResponse(admin)
 }
 
 func (s *Service) GoogleOnboard(req GoogleOnboardingRequest) (*AuthResponse, error) {
-	email, err := s.verifyGoogleToken(req.GoogleToken)
+	if s.verifier == nil {
+		return nil, apperror.BadRequest("google login not configured", nil)
+	}
+	email, sub, err := s.verifier.Verify(req.GoogleToken)
 	if err != nil {
 		return nil, err
 	}
@@ -128,18 +110,24 @@ func (s *Service) GoogleOnboard(req GoogleOnboardingRequest) (*AuthResponse, err
 		return nil, fmt.Errorf("create customer: %w", err)
 	}
 
-	// Google users get a random password hash (they authenticate via Google, not password)
+	// Google users get a random password hash (they authenticate via Google, not password).
 	randomPass := make([]byte, 32)
-	rand.Read(randomPass)
+	if _, err := rand.Read(randomPass); err != nil {
+		return nil, fmt.Errorf("read random: %w", err)
+	}
 	hash, err := bcrypt.GenerateFromPassword(randomPass, bcrypt.DefaultCost)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
+	subCopy := sub
+	emailCopy := email
 	admin := &Admin{
 		CustomerID:   customerID,
 		Email:        email,
 		PasswordHash: string(hash),
+		GoogleSub:    &subCopy,
+		GoogleEmail:  &emailCopy,
 		Active:       true,
 	}
 
@@ -147,50 +135,37 @@ func (s *Service) GoogleOnboard(req GoogleOnboardingRequest) (*AuthResponse, err
 		return nil, err
 	}
 
-	token, err := s.generateJWT(admin)
+	return s.makeAuthResponse(admin)
+}
+
+// LinkGoogle associates the Google identity in googleToken to the admin
+// identified by adminID. Fails with 409 if the Google sub is already linked
+// to a different admin.
+func (s *Service) LinkGoogle(adminID, googleToken string) (*Admin, error) {
+	if s.verifier == nil {
+		return nil, apperror.BadRequest("google login not configured", nil)
+	}
+	email, sub, err := s.verifier.Verify(googleToken)
 	if err != nil {
 		return nil, err
 	}
 
-	return &AuthResponse{
-		Token: token,
-		Admin: AdminSummary{
-			ID:         admin.ID,
-			Email:      admin.Email,
-			CustomerID: admin.CustomerID,
-		},
-	}, nil
+	// Reject if the sub is already linked to another admin.
+	if existing, err := s.repo.GetByGoogleSub(sub); err == nil && existing.ID != adminID {
+		return nil, apperror.Conflict("google account already linked to another admin", nil)
+	}
+
+	if err := s.repo.LinkGoogle(adminID, sub, email); err != nil {
+		return nil, err
+	}
+	return s.repo.GetByID(adminID)
 }
 
-func (s *Service) verifyGoogleToken(idToken string) (string, error) {
-	resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?id_token=" + url.QueryEscape(idToken))
-	if err != nil {
-		return "", fmt.Errorf("verify google token: %w", err)
+func (s *Service) UnlinkGoogle(adminID string) (*Admin, error) {
+	if err := s.repo.UnlinkGoogle(adminID); err != nil {
+		return nil, err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("invalid google token")
-	}
-
-	var claims struct {
-		Aud           string `json:"aud"`
-		Email         string `json:"email"`
-		EmailVerified string `json:"email_verified"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&claims); err != nil {
-		return "", fmt.Errorf("decode google token: %w", err)
-	}
-
-	if s.googleClientID != "" && claims.Aud != s.googleClientID {
-		return "", fmt.Errorf("google token audience mismatch")
-	}
-
-	if claims.EmailVerified != "true" {
-		return "", fmt.Errorf("google email not verified")
-	}
-
-	return claims.Email, nil
+	return s.repo.GetByID(adminID)
 }
 
 func (s *Service) Onboard(req OnboardingRequest) (*AuthResponse, error) {
@@ -205,6 +180,22 @@ func (s *Service) Onboard(req OnboardingRequest) (*AuthResponse, error) {
 	}
 
 	return s.Register(req.AdminEmail, req.AdminPassword, customerID)
+}
+
+func (s *Service) makeAuthResponse(admin *Admin) (*AuthResponse, error) {
+	token, err := s.generateJWT(admin)
+	if err != nil {
+		return nil, err
+	}
+	return &AuthResponse{
+		Token: token,
+		Admin: AdminSummary{
+			ID:          admin.ID,
+			Email:       admin.Email,
+			CustomerID:  admin.CustomerID,
+			GoogleEmail: admin.GoogleEmail,
+		},
+	}, nil
 }
 
 // generateUniqueSlug creates a slug from the first word of the name + 3 random chars.
@@ -252,7 +243,9 @@ func slugBase(name string) string {
 func randomChars(n int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	buf := make([]byte, n)
-	rand.Read(buf)
+	if _, err := rand.Read(buf); err != nil {
+		return strings.Repeat("a", n)
+	}
 	for i := range buf {
 		buf[i] = charset[buf[i]%byte(len(charset))]
 	}

@@ -171,11 +171,14 @@ export interface GoogleOnboardingRequest {
   description?: string
 }
 
+export interface AdminSummary {
+  id: string
+  email: string
+  customer_id: string
+  google_email?: string | null
+}
+
 export interface AuthResponse {
   token: string
-  admin: {
-    id: string
-    email: string
-    customer_id: string
-  }
+  admin: AdminSummary
 }
