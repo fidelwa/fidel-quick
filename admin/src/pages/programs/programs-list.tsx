@@ -76,8 +76,9 @@ type ProgramRow = {
   href: string | null
 }
 
-// `accent` is the left-border tint that pops on row hover/focus to make
-// the selection feel tactile and reinforces the program type at a glance.
+// `accent` is the per-type tint we feed into a CSS variable on the row so
+// hover/focus animations (glow halo + sliding accent bar + chevron drift)
+// pick up the type's signature color.
 const TYPE_META: Record<
   SisfiType,
   { label: string; icon: LucideIcon; chip: string; accent: string }
@@ -86,19 +87,19 @@ const TYPE_META: Record<
     label: "Puntos",
     icon: Star,
     chip: "bg-[#E0B0CC]/40 text-[#8a3d6a]",
-    accent: "hover:shadow-[inset_4px_0_0_0_#8a3d6a] focus-visible:shadow-[inset_4px_0_0_0_#8a3d6a]",
+    accent: "#8a3d6a",
   },
   cashback: {
     label: "Cashback",
     icon: Wallet,
     chip: "bg-[#A8CDE0]/40 text-[#2c5d75]",
-    accent: "hover:shadow-[inset_4px_0_0_0_#2c5d75] focus-visible:shadow-[inset_4px_0_0_0_#2c5d75]",
+    accent: "#2c5d75",
   },
   pushcard: {
     label: "Tarjeta de sellos",
     icon: Stamp,
     chip: "bg-[#B49DD9]/35 text-[#5b3d8a]",
-    accent: "hover:shadow-[inset_4px_0_0_0_#5b3d8a] focus-visible:shadow-[inset_4px_0_0_0_#5b3d8a]",
+    accent: "#5b3d8a",
   },
 }
 
@@ -432,12 +433,17 @@ export function ProgramsListPage() {
                       onKeyDown={onRowKeyDown}
                       tabIndex={r.href ? 0 : undefined}
                       role={r.href ? "link" : undefined}
-                      className={`border-white/20 transition-shadow duration-150 hover:bg-white/40 ${r.href ? `cursor-pointer focus-visible:outline-none ${meta.accent}` : ""}`}
+                      style={{ ["--row-accent" as string]: meta.accent }}
+                      className={`group relative border-0 transition-[background-color,transform,box-shadow] duration-300 ease-out ${
+                        r.href
+                          ? "cursor-pointer hover:bg-white/55 hover:[transform:translateX(4px)] hover:shadow-[inset_3px_0_0_var(--row-accent),0_10px_30px_-12px_color-mix(in_oklch,var(--row-accent)_55%,transparent)] focus-visible:bg-white/55 focus-visible:[transform:translateX(4px)] focus-visible:shadow-[inset_3px_0_0_var(--row-accent),0_10px_30px_-12px_color-mix(in_oklch,var(--row-accent)_55%,transparent)] focus-visible:outline-none"
+                          : ""
+                      }`}
                     >
                       <TableCell className="font-medium">{r.name}</TableCell>
                       <TableCell>
                         <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${meta.chip}`}
+                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-transform duration-300 ease-out group-hover:scale-105 group-focus-visible:scale-105 ${meta.chip}`}
                         >
                           <Icon className="h-3 w-3" />
                           {meta.label}
@@ -450,7 +456,11 @@ export function ProgramsListPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {r.href ? <ChevronRight className="h-4 w-4" /> : null}
+                        {r.href ? (
+                          <ChevronRight
+                            className="h-4 w-4 transition-all duration-300 ease-out group-hover:translate-x-1 group-hover:text-[color:var(--row-accent)] group-focus-visible:translate-x-1 group-focus-visible:text-[color:var(--row-accent)]"
+                          />
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   )
