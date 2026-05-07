@@ -6,15 +6,15 @@ import {
   Users,
   UserSearch,
   MessageSquare,
-  Stamp,
   LogOut,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/context/auth-context"
-import { usePushcardConfig } from "@/hooks/use-pushcard"
 import { Separator } from "@/components/ui/separator"
 
-const baseNavItems = [
+// 'Tarjeta de sellos' no tiene su propia entrada — todos los sisfis se acceden
+// desde la página unificada `/programas` (FID-23).
+const navItems = [
   { to: "/", label: "Inicio", icon: Home },
   { to: "/perfil", label: "Mi Negocio", icon: Building2 },
   { to: "/programas", label: "Programas", icon: Trophy },
@@ -23,24 +23,8 @@ const baseNavItems = [
   { to: "/feedback", label: "Feedback", icon: MessageSquare },
 ]
 
-const pushcardNavItem = {
-  to: "/pushcard",
-  label: "Tarjeta de sellos",
-  icon: Stamp,
-}
-
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { logout, customerId } = useAuth()
-  const { data: pushcardConfig } = usePushcardConfig(customerId)
-
-  // 'Tarjeta de sellos' solo aparece si el customer tiene pushcard activo.
-  // El endpoint devuelve 404 (no config) o un row con active=false; en ambos
-  // casos ocultamos la entrada para evitar que el admin navegue a una página
-  // de un sisfi que no aplica.
-  const showPushcard = pushcardConfig?.active === true
-  const navItems = showPushcard
-    ? [...baseNavItems.slice(0, 3), pushcardNavItem, ...baseNavItems.slice(3)]
-    : baseNavItems
+  const { logout } = useAuth()
 
   return (
     <div className="glass-strong flex h-full flex-col rounded-none border-0 text-sidebar-foreground">

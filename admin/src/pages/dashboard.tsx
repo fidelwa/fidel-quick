@@ -2,6 +2,7 @@ import { useAuth } from "@/context/auth-context"
 import { useCustomer } from "@/hooks/use-customer"
 import { usePrograms } from "@/hooks/use-programs"
 import { useCashbackPrograms } from "@/hooks/use-cashback-programs"
+import { usePushcardConfig } from "@/hooks/use-pushcard"
 import { useCollaborators } from "@/hooks/use-collaborators"
 import { useClients } from "@/hooks/use-clients"
 import {
@@ -68,10 +69,14 @@ export function DashboardPage() {
   const { data: customer, isLoading: loadingCustomer } = useCustomer(customerId)
   const { data: programs } = usePrograms(customerId)
   const { data: cashbackPrograms } = useCashbackPrograms(customerId)
+  const { data: pushcardConfig } = usePushcardConfig(customerId)
   const { data: collaborators } = useCollaborators(customerId)
   const { data: clients } = useClients(customerId)
 
-  const totalPrograms = (programs?.length ?? 0) + (cashbackPrograms?.length ?? 0)
+  const activeEarn = (programs ?? []).filter((p) => p.active).length
+  const activeCashback = (cashbackPrograms ?? []).filter((p) => p.active).length
+  const activePushcard = pushcardConfig?.active ? 1 : 0
+  const totalPrograms = activeEarn + activeCashback + activePushcard
 
   return (
     <div className="space-y-6">
@@ -199,23 +204,21 @@ export function DashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {programs?.map((prog) => (
+                {programs?.filter((p) => p.active).map((prog) => (
                   <TableRow key={prog.id} className="border-white/20 hover:bg-white/30">
                     <TableCell className="font-medium">{prog.name}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="border-white/55 bg-white/40">
-                        Earn-Burn
+                        Puntos
                       </Badge>
                     </TableCell>
                     <TableCell>1 pt / ${prog.points_ratio}</TableCell>
                     <TableCell>
-                      <Badge variant={prog.active ? "default" : "secondary"}>
-                        {prog.active ? "Activo" : "Inactivo"}
-                      </Badge>
+                      <Badge variant="default">Activo</Badge>
                     </TableCell>
                   </TableRow>
                 ))}
-                {cashbackPrograms?.map((prog) => (
+                {cashbackPrograms?.filter((p) => p.active).map((prog) => (
                   <TableRow key={prog.id} className="border-white/20 hover:bg-white/30">
                     <TableCell className="font-medium">{prog.name}</TableCell>
                     <TableCell>
@@ -223,14 +226,28 @@ export function DashboardPage() {
                         Cashback
                       </Badge>
                     </TableCell>
-                    <TableCell>{prog.cashback_rate}%</TableCell>
                     <TableCell>
-                      <Badge variant={prog.active ? "default" : "secondary"}>
-                        {prog.active ? "Activo" : "Inactivo"}
-                      </Badge>
+                      {(prog.cashback_rate <= 1 ? prog.cashback_rate * 100 : prog.cashback_rate).toFixed(2)}%
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="default">Activo</Badge>
                     </TableCell>
                   </TableRow>
                 ))}
+                {pushcardConfig?.active && (
+                  <TableRow key={pushcardConfig.customer_sisfi_id} className="border-white/20 hover:bg-white/30">
+                    <TableCell className="font-medium">{pushcardConfig.name || "Tarjeta de sellos"}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="border-white/55 bg-white/40">
+                        Tarjeta de sellos
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{pushcardConfig.card_slots} sellos</TableCell>
+                    <TableCell>
+                      <Badge variant="default">Activo</Badge>
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           ) : (
