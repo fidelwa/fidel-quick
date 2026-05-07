@@ -176,7 +176,11 @@ resource "google_sql_database_instance" "postgres" {
     }
 
     ip_configuration {
-      ipv4_enabled = false
+      # MVP: IP pública habilitada. Cloud Run accede vía Unix socket
+      # (/cloudsql/...) usando el cloudsql-proxy, sin exponer realmente
+      # un endpoint público — pero la API requiere al menos un tipo de IP
+      # habilitado al crear la instancia.
+      ipv4_enabled = true
     }
   }
 
