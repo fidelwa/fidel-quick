@@ -24,8 +24,12 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# env files (todos los .env* tienen secretos excepto .env.example y .env.deploy.example)
 .env
+.env.local
+.env.deploy
+.env.production
+.env.staging
 
 # Editor/IDE
 # .idea/
