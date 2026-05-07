@@ -118,6 +118,7 @@ func (m *mockRepo) ListPrograms(ctx context.Context, customerID string) ([]Cashb
 	}
 	return nil, nil
 }
+func (m *mockRepo) CreateProgram(ctx context.Context, p *CashbackProgram) error { return nil }
 func (m *mockRepo) ListAllRewards(ctx context.Context, customerSisfiID string) ([]CashbackReward, error) {
 	if m.listAllRewardsFn != nil {
 		return m.listAllRewardsFn(ctx, customerSisfiID)

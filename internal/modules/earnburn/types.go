@@ -43,8 +43,10 @@ type Redemption struct {
 	CreatedAt       time.Time  `json:"created_at"`
 }
 
+// EarnBurnProgram is wire-serialized with `id` (mapped from the customer_sisfi
+// row id) so the frontend can use the same `id` field across all program types.
 type EarnBurnProgram struct {
-	CustomerSisfiID string `json:"customer_sisfi_id"`
+	CustomerSisfiID string `json:"id"`
 	CustomerID      string `json:"customer_id"`
 	Name            string `json:"name"`
 	PointsRatio     int    `json:"points_ratio"`

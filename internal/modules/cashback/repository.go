@@ -10,6 +10,7 @@ import (
 type Repository interface {
 	GetProgram(ctx context.Context, customerID string) (*CashbackProgram, error)
 	GetProgramByID(ctx context.Context, customerSisfiID string) (*CashbackProgram, error)
+	CreateProgram(ctx context.Context, p *CashbackProgram) error
 	GetBalance(ctx context.Context, clientID, customerSisfiID string) (float64, error)
 	UpsertBalance(ctx context.Context, clientID, customerSisfiID string, delta float64) (float64, error)
 	CreateTransaction(ctx context.Context, tx *CashbackTransaction) error
@@ -67,6 +68,40 @@ func (r *PostgresRepository) GetProgram(ctx context.Context, customerID string) 
 		return nil, fmt.Errorf("get cashback program: %w", err)
 	}
 	return &p, nil
+}
+
+// CreateProgram activates cashback for a customer: inserts customer_sisfi link
+// and config_cashback row in a single transaction. Sets p.CustomerSisfiID on success.
+// CashbackRate is stored as a fraction (0 < rate <= 1).
+func (r *PostgresRepository) CreateProgram(ctx context.Context, p *CashbackProgram) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var customerSisfiID string
+	if err := tx.QueryRowContext(ctx, `
+		INSERT INTO customer_sisfi (customer_id, sisfi_id, name)
+		VALUES ($1, 'cashback', $2)
+		RETURNING id
+	`, p.CustomerID, p.Name).Scan(&customerSisfiID); err != nil {
+		return fmt.Errorf("insert customer_sisfi: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO config_cashback (customer_sisfi_id, cashback_rate)
+		VALUES ($1, $2)
+	`, customerSisfiID, p.CashbackRate); err != nil {
+		return fmt.Errorf("insert config_cashback: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	p.CustomerSisfiID = customerSisfiID
+	p.Active = true
+	return nil
 }
 
 func (r *PostgresRepository) GetProgramByID(ctx context.Context, customerSisfiID string) (*CashbackProgram, error) {

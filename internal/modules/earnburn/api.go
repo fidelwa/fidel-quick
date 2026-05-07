@@ -23,6 +23,7 @@ func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	programs := rg.Group("/programs")
 	{
 		programs.GET("", h.listPrograms)
+		programs.POST("", h.createProgram)
 		programs.POST("/:id/rewards", h.createReward)
 		programs.GET("/:id/rewards", h.listRewards)
 		programs.PUT("/:id/rewards/:reward_id", h.updateReward)
@@ -52,6 +53,34 @@ func (h *APIHandler) listPrograms(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, programs)
+}
+
+func (h *APIHandler) createProgram(c *gin.Context) {
+	var req struct {
+		CustomerID  string `json:"customer_id" binding:"required"`
+		Name        string `json:"name" binding:"required"`
+		PointsRatio int    `json:"points_ratio" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.BadRequest("datos invalidos", err))
+		return
+	}
+	p := &EarnBurnProgram{
+		CustomerID:  req.CustomerID,
+		Name:        req.Name,
+		PointsRatio: req.PointsRatio,
+	}
+	if err := h.service.CreateProgram(c.Request.Context(), p); err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"id":           p.CustomerSisfiID,
+		"customer_id":  p.CustomerID,
+		"name":         p.Name,
+		"points_ratio": p.PointsRatio,
+		"active":       true,
+	})
 }
 
 // --- Reward endpoints ---
