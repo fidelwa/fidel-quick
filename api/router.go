@@ -118,6 +118,12 @@ func registerAdminSPA(r *gin.Engine, spa fs.FS) {
 	httpFS := http.FS(spa)
 	fileServer := http.StripPrefix("/admin/", http.FileServer(httpFS))
 
+	// Bare / redirige al SPA — UX para cuando alguien comparte la URL
+	// raíz del servicio. /healthz, /readyz, /webhook tienen handlers
+	// propios y no caen acá.
+	r.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/admin/")
+	})
 	r.GET("/admin", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/admin/")
 	})
