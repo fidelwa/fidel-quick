@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	_ "embed"
+	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -35,6 +37,7 @@ func SetupRouter(
 	sisfiAPI *sisfi.APIHandler,
 	database *sql.DB,
 	redisClient *redis.Client,
+	adminSPA fs.FS,
 	log *slog.Logger,
 	isDev bool,
 ) *gin.Engine {
@@ -42,6 +45,13 @@ func SetupRouter(
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.Default()
+
+	// Admin SPA — sólo cuando el binario fue compilado con `-tags prod`
+	// y trae el bundle embebido. En dev `adminSPA` es nil y el SPA se
+	// sirve por Vite en :5173.
+	if adminSPA != nil {
+		registerAdminSPA(r, adminSPA)
+	}
 
 	// Health probes (públicas) — Cloud Run liveness/readiness.
 	// /healthz: liveness (proceso vivo, sin tocar dependencias).
@@ -99,6 +109,32 @@ func SetupRouter(
 	registry.RegisterAllRoutes(v1)
 
 	return r
+}
+
+// registerAdminSPA monta el bundle React en /admin/* con SPA fallback:
+// rutas client-side (ej. /admin/dashboard) que no matchean un asset
+// devuelven index.html para que React Router las maneje.
+func registerAdminSPA(r *gin.Engine, spa fs.FS) {
+	httpFS := http.FS(spa)
+	fileServer := http.StripPrefix("/admin/", http.FileServer(httpFS))
+
+	r.GET("/admin", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/admin/")
+	})
+	r.GET("/admin/*filepath", func(c *gin.Context) {
+		path := strings.TrimPrefix(c.Param("filepath"), "/")
+		if path == "" {
+			path = "index.html"
+		}
+		if f, err := spa.Open(path); err == nil {
+			_ = f.Close()
+			fileServer.ServeHTTP(c.Writer, c.Request)
+			return
+		}
+		// SPA fallback.
+		c.Request.URL.Path = "/admin/index.html"
+		fileServer.ServeHTTP(c.Writer, c.Request)
+	})
 }
 
 // readyzHandler verifica conectividad con Postgres y Redis con timeout 1s.
