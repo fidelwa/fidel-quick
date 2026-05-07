@@ -76,10 +76,30 @@ type ProgramRow = {
   href: string | null
 }
 
-const TYPE_META: Record<SisfiType, { label: string; icon: LucideIcon; chip: string }> = {
-  earn_burn: { label: "Puntos", icon: Star, chip: "bg-[#E0B0CC]/40 text-[#8a3d6a]" },
-  cashback: { label: "Cashback", icon: Wallet, chip: "bg-[#A8CDE0]/40 text-[#2c5d75]" },
-  pushcard: { label: "Tarjeta de sellos", icon: Stamp, chip: "bg-[#B49DD9]/35 text-[#5b3d8a]" },
+// `accent` is the left-border tint that pops on row hover/focus to make
+// the selection feel tactile and reinforces the program type at a glance.
+const TYPE_META: Record<
+  SisfiType,
+  { label: string; icon: LucideIcon; chip: string; accent: string }
+> = {
+  earn_burn: {
+    label: "Puntos",
+    icon: Star,
+    chip: "bg-[#E0B0CC]/40 text-[#8a3d6a]",
+    accent: "hover:shadow-[inset_4px_0_0_0_#8a3d6a] focus-visible:shadow-[inset_4px_0_0_0_#8a3d6a]",
+  },
+  cashback: {
+    label: "Cashback",
+    icon: Wallet,
+    chip: "bg-[#A8CDE0]/40 text-[#2c5d75]",
+    accent: "hover:shadow-[inset_4px_0_0_0_#2c5d75] focus-visible:shadow-[inset_4px_0_0_0_#2c5d75]",
+  },
+  pushcard: {
+    label: "Tarjeta de sellos",
+    icon: Stamp,
+    chip: "bg-[#B49DD9]/35 text-[#5b3d8a]",
+    accent: "hover:shadow-[inset_4px_0_0_0_#5b3d8a] focus-visible:shadow-[inset_4px_0_0_0_#5b3d8a]",
+  },
 }
 
 export function ProgramsListPage() {
@@ -412,7 +432,7 @@ export function ProgramsListPage() {
                       onKeyDown={onRowKeyDown}
                       tabIndex={r.href ? 0 : undefined}
                       role={r.href ? "link" : undefined}
-                      className={`border-white/20 hover:bg-white/30 ${r.href ? "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" : ""}`}
+                      className={`border-white/20 transition-shadow duration-150 hover:bg-white/40 ${r.href ? `cursor-pointer focus-visible:outline-none ${meta.accent}` : ""}`}
                     >
                       <TableCell className="font-medium">{r.name}</TableCell>
                       <TableCell>
