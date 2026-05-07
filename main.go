@@ -127,6 +127,7 @@ func main() {
 	// WhatsApp webhook handler
 	webhookHandler := whatsapp.NewWebhookHandler(
 		cfg.WhatsAppVerifyToken,
+		cfg.WhatsAppAppSecret,
 		waClient,
 		sessionMgr,
 		businessResolver,
