@@ -9,7 +9,7 @@ import { useCustomer, useUpdateCustomer } from "@/hooks/use-customer"
 import { useMe, useLinkGoogle, useUnlinkGoogle } from "@/hooks/use-me"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { GlassCard, GlassCardContent, GlassCardDescription, GlassCardHeader, GlassCardTitle } from "@/components/ui/glass-card"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Form,
@@ -107,12 +107,12 @@ export function ProfilePage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Mi Negocio</h1>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Informacion del negocio</CardTitle>
-          <CardDescription>Actualiza los datos de tu establecimiento</CardDescription>
-        </CardHeader>
-        <CardContent>
+      <GlassCard>
+        <GlassCardHeader>
+          <GlassCardTitle>Informacion del negocio</GlassCardTitle>
+          <GlassCardDescription>Actualiza los datos de tu establecimiento</GlassCardDescription>
+        </GlassCardHeader>
+        <GlassCardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -213,17 +213,17 @@ export function ProfilePage() {
               </Button>
             </form>
           </Form>
-        </CardContent>
-      </Card>
+        </GlassCardContent>
+      </GlassCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Cuenta de Google</CardTitle>
-          <CardDescription>
+      <GlassCard>
+        <GlassCardHeader>
+          <GlassCardTitle>Cuenta de Google</GlassCardTitle>
+          <GlassCardDescription>
             Vincula tu cuenta Google para iniciar sesion con un click.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+          </GlassCardDescription>
+        </GlassCardHeader>
+        <GlassCardContent>
           {meLoading ? (
             <Skeleton className="h-12 w-full" />
           ) : me?.google_email ? (
@@ -260,8 +260,8 @@ export function ProfilePage() {
               Configura <code>VITE_GOOGLE_CLIENT_ID</code> para habilitar Google.
             </p>
           )}
-        </CardContent>
-      </Card>
+        </GlassCardContent>
+      </GlassCard>
     </div>
   )
 }

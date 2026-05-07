@@ -32,6 +32,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
+import { GlassCard, GlassCardContent } from "@/components/ui/glass-card"
 import { Plus } from "lucide-react"
 
 const createSchema = z.object({
@@ -66,7 +67,7 @@ export function CollaboratorsListPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Colaboradores</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Colaboradores</h1>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button>
@@ -122,34 +123,50 @@ export function CollaboratorsListPage() {
           ))}
         </div>
       ) : !collaborators?.length ? (
-        <div className="rounded-lg border border-dashed p-8 text-center">
-          <p className="text-muted-foreground">No hay colaboradores. Crea el primero.</p>
-        </div>
+        <GlassCard>
+          <GlassCardContent>
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No hay colaboradores. Crea el primero.
+            </p>
+          </GlassCardContent>
+        </GlassCard>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Telefono</TableHead>
-              <TableHead>Hash ID</TableHead>
-              <TableHead>Estado</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {collaborators.map((c) => (
-              <TableRow key={c.id}>
-                <TableCell className="font-medium">{c.name}</TableCell>
-                <TableCell>{c.phone}</TableCell>
-                <TableCell className="font-mono text-xs">{c.hash_id}</TableCell>
-                <TableCell>
-                  <Badge variant={c.active ? "default" : "secondary"}>
-                    {c.active ? "Activo" : "Inactivo"}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <GlassCard>
+          <GlassCardContent>
+            <Table>
+              <TableHeader>
+                <TableRow className="border-b border-white/40 hover:bg-transparent">
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Nombre
+                  </TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Telefono
+                  </TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Hash ID
+                  </TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Estado
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {collaborators.map((c) => (
+                  <TableRow key={c.id} className="border-0 hover:bg-white/40">
+                    <TableCell className="rounded-l-2xl py-4 font-medium">{c.name}</TableCell>
+                    <TableCell className="py-4">{c.phone}</TableCell>
+                    <TableCell className="py-4 font-mono text-xs">{c.hash_id}</TableCell>
+                    <TableCell className="rounded-r-2xl py-4">
+                      <Badge variant={c.active ? "default" : "secondary"}>
+                        {c.active ? "Activo" : "Inactivo"}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </GlassCardContent>
+        </GlassCard>
       )}
     </div>
   )
