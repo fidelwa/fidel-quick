@@ -77,5 +77,8 @@ jobs:
           URL=$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)')
           echo "🚀 Deployed to: $URL"
           echo "::notice title=Deployed::$URL"
-          # Smoke test
-          curl -fsS "$URL/healthz" || (echo "❌ healthz failed" && exit 1)
+          # Smoke test: usar /readyz (no /healthz). GFE intercepta /healthz
+          # y devuelve 404 antes de llegar al container — la sonda interna
+          # de Cloud Run sí lo alcanza, pero curl externo no. /readyz hace
+          # check más fuerte (ping DB + Redis con timeout 1s).
+          curl -fsS "$URL/readyz" || (echo "❌ readyz failed" && exit 1)
