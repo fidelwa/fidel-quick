@@ -310,20 +310,23 @@ resource "google_cloud_run_v2_service" "api" {
       }
 
       resources {
+        # 512Mi mínimo: Cloud Run rechaza <512Mi cuando cpu="1" en modo
+        # always-allocated (default cpu_idle=false). Si bajamos a 256Mi
+        # habría que setear scaling.cpu_idle=true (best-effort cpu),
+        # pero impacta el cold-start del webhook de WhatsApp.
         limits = {
-          memory = "256Mi"
+          memory = "512Mi"
           cpu    = "1"
         }
       }
 
       # Environment variables
+      # NOTE: PORT es env var reservada en Cloud Run (la setea el sistema
+      # automáticamente al puerto del container). No la incluyas o terraform
+      # apply falla con "reserved env names were provided: PORT".
       env {
         name  = "ENV"
         value = "production"
-      }
-      env {
-        name  = "PORT"
-        value = "8080"
       }
       env {
         name  = "S3_BUCKET"
