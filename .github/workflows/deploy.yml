@@ -1,0 +1,75 @@
+name: deploy
+
+# CI/CD básico para MVP — sin tests (post-MVP).
+# En cada push a main: build → push a Artifact Registry → deploy a Cloud Run.
+#
+# Setup previo: ver .github/SETUP_CI.md para los secrets de GitHub que requiere.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # permite trigger manual desde la UI
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  SERVICE: fidel-quick
+  ARTIFACT_REPO: fidel-repo
+  DB_INSTANCE: fidel-db
+
+# Evitar deploys concurrentes — el último push a main siempre gana.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Auth to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build & push image to Artifact Registry
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${SERVICE}:${GITHUB_SHA::7}"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+          gcloud builds submit \
+            --tag="$IMAGE" \
+            --project="$PROJECT_ID" \
+            .
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --memory=512Mi --cpu=1 \
+            --min-instances=0 --max-instances=2 \
+            --timeout=60 \
+            --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${DB_INSTANCE}" \
+            --set-env-vars="ENV=production,PORT=8080,S3_ENDPOINT=storage.googleapis.com,S3_BUCKET=${{ vars.GCS_BUCKET }},S3_REGION=${REGION},WHATSAPP_PHONE_NUMBER_ID=${{ vars.WHATSAPP_PHONE_NUMBER_ID }},WHATSAPP_DISPLAY_PHONE=${{ vars.WHATSAPP_DISPLAY_PHONE }}" \
+            --set-secrets="JWT_SECRET=JWT_SECRET:latest,BEARER_TOKEN=BEARER_TOKEN:latest,WHATSAPP_API_TOKEN=WHATSAPP_API_TOKEN:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,WHATSAPP_APP_SECRET=WHATSAPP_APP_SECRET:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,REDIS_URL=REDIS_URL:latest,DATABASE_URL=DATABASE_URL:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest"
+
+      - name: Output service URL
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)')
+          echo "🚀 Deployed to: $URL"
+          echo "::notice title=Deployed::$URL"
+          # Smoke test
+          curl -fsS "$URL/healthz" || (echo "❌ healthz failed" && exit 1)
