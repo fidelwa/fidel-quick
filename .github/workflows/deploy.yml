@@ -69,7 +69,7 @@ jobs:
             --min-instances=0 --max-instances=2 \
             --timeout=60 \
             --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${DB_INSTANCE}" \
-            --set-env-vars="ENV=production,PORT=8080,S3_ENDPOINT=storage.googleapis.com,S3_BUCKET=${{ vars.GCS_BUCKET }},S3_REGION=${REGION},WHATSAPP_PHONE_NUMBER_ID=${{ vars.WHATSAPP_PHONE_NUMBER_ID }},WHATSAPP_DISPLAY_PHONE=${{ vars.WHATSAPP_DISPLAY_PHONE }}" \
+            --set-env-vars="ENV=production,S3_ENDPOINT=storage.googleapis.com,S3_BUCKET=${{ vars.GCS_BUCKET }},S3_REGION=${REGION},WHATSAPP_PHONE_NUMBER_ID=${{ vars.WHATSAPP_PHONE_NUMBER_ID }},WHATSAPP_DISPLAY_PHONE=${{ vars.WHATSAPP_DISPLAY_PHONE }}" \
             --set-secrets="JWT_SECRET=JWT_SECRET:latest,BEARER_TOKEN=BEARER_TOKEN:latest,WHATSAPP_API_TOKEN=WHATSAPP_API_TOKEN:latest,WHATSAPP_VERIFY_TOKEN=WHATSAPP_VERIFY_TOKEN:latest,WHATSAPP_APP_SECRET=WHATSAPP_APP_SECRET:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,REDIS_URL=REDIS_URL:latest,DATABASE_URL=DATABASE_URL:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest"
 
       - name: Output service URL
