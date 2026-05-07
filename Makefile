@@ -127,6 +127,72 @@ start-docker: ## One command: everything containerized (build + run)
 	@echo "  API:    http://localhost:8080"
 	@echo "  MinIO:  http://localhost:9001"
 
+## Production tear-down (DESTRUCTIVE)
+
+# Workdir donde vive el state de terraform (creado por el flujo de despliegue,
+# fuera del repo para que no se commitee). Sobrescribir con TF_WORKDIR=/otra/ruta.
+TF_WORKDIR ?= $(HOME)/.fidel-deploy/tfwork
+
+.PHONY: destroy
+destroy: ## ⚠️  Destruir TODA la infra GCP (DB y datos incluidos). Pide confirmación tipeando BORRAR-TODO.
+	@echo ""
+	@echo "════════════════════════════════════════════════════════════════════"
+	@echo "  ⚠️   make destroy  —  TEAR-DOWN COMPLETO DE INFRA GCP"
+	@echo "════════════════════════════════════════════════════════════════════"
+	@echo ""
+	@echo "  Esto va a BORRAR PERMANENTEMENTE:"
+	@echo ""
+	@echo "    • Cloud SQL Postgres (fidel-db) Y TODOS LOS DATOS"
+	@echo "        - clientes, colaboradores, transacciones, balances,"
+	@echo "          tarjetas pushcard, sesiones admin, customer_sisfi, etc."
+	@echo "    • Cloud Storage bucket (fidel-mvp-invoice) y TODAS las fotos"
+	@echo "        de facturas almacenadas."
+	@echo "    • Cloud Run service (fidel-quick) — la URL pública dejará"
+	@echo "        de responder. Webhook de WhatsApp empezará a fallar."
+	@echo "    • Secret Manager (9 secrets: WhatsApp, JWT, Gemini, etc.)."
+	@echo "    • Artifact Registry (imágenes Docker pushed)."
+	@echo "    • Service Account fidel-quick-sa y sus IAM bindings."
+	@echo ""
+	@echo "  Esta operación NO ES REVERSIBLE."
+	@echo "  Los backups automáticos de Cloud SQL también se pierden con la instancia."
+	@echo ""
+	@echo "  Si solo quieres parar costos temporalmente (sin perder datos),"
+	@echo "  considera en su lugar:"
+	@echo "    gcloud run services update fidel-quick --min-instances=0 --max-instances=0"
+	@echo "    gcloud sql instances patch fidel-db --activation-policy=NEVER"
+	@echo ""
+	@echo "════════════════════════════════════════════════════════════════════"
+	@echo ""
+	@printf "  Para confirmar, tipea EXACTAMENTE  \033[1;31mBORRAR-TODO\033[0m  y enter: "
+	@read CONFIRM; \
+	if [ "$$CONFIRM" != "BORRAR-TODO" ]; then \
+		echo ""; echo "  ❌ Confirmación no coincide. Abortado."; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "  → Desactivando deletion_protection del Cloud SQL..."
+	@-gcloud sql instances patch fidel-db --no-deletion-protection --quiet 2>/dev/null || \
+		echo "    (instancia no existe o ya sin protección — continúo)"
+	@echo "  → Corriendo terraform destroy en $(TF_WORKDIR)..."
+	@if [ ! -d "$(TF_WORKDIR)" ]; then \
+		echo "    ⚠️  $(TF_WORKDIR) no existe — saltando terraform destroy."; \
+		echo "    Si la infra fue creada con gcloud manual, bórrala desde la consola."; \
+	else \
+		cd $(TF_WORKDIR) && terraform destroy -auto-approve; \
+	fi
+	@echo "  → Borrando secrets sobrevivientes (best-effort)..."
+	@for s in WHATSAPP_API_TOKEN WHATSAPP_VERIFY_TOKEN WHATSAPP_APP_SECRET \
+	          JWT_SECRET BEARER_TOKEN GEMINI_API_KEY GOOGLE_CLIENT_ID \
+	          DB_PASSWORD REDIS_URL; do \
+		gcloud secrets delete $$s --quiet 2>/dev/null || true; \
+	done
+	@echo ""
+	@echo "  ✓ Tear-down completado."
+	@echo "    Verifica en https://console.cloud.google.com/billing que el spend"
+	@echo "    se detiene en las próximas 24h. Cloud SQL deja de cobrar inmediato;"
+	@echo "    Cloud Run / GCS prorratean."
+	@echo ""
+
 ## Help
 
 .PHONY: help
