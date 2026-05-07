@@ -6,7 +6,7 @@ import { useClientBalance, useClientTransactions, useCashbackClientBalance, useC
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { GlassCard, GlassCardContent, GlassCardHeader, GlassCardTitle } from "@/components/ui/glass-card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -72,11 +72,11 @@ export function ClientLookupPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Buscar Cliente</h1>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Consulta de balance y transacciones</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <GlassCard>
+        <GlassCardHeader>
+          <GlassCardTitle>Consulta de balance y transacciones</GlassCardTitle>
+        </GlassCardHeader>
+        <GlassCardContent className="space-y-4">
           <Tabs value={programType} onValueChange={(v) => { setProgramType(v as "earn_burn" | "cashback"); setSelectedProgramId("") }}>
             <TabsList>
               <TabsTrigger value="earn_burn">Earn-Burn</TabsTrigger>
@@ -114,16 +114,16 @@ export function ClientLookupPage() {
               </Button>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </GlassCardContent>
+      </GlassCard>
 
       {searchTriggered && (
         <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Balance</CardTitle>
-            </CardHeader>
-            <CardContent>
+          <GlassCard>
+            <GlassCardHeader>
+              <GlassCardTitle>Balance</GlassCardTitle>
+            </GlassCardHeader>
+            <GlassCardContent>
               {balance.isLoading ? (
                 <Skeleton className="h-10 w-32" />
               ) : balance.isError ? (
@@ -135,14 +135,14 @@ export function ClientLookupPage() {
                     : formatCurrency(balance.data.balance)}
                 </p>
               ) : null}
-            </CardContent>
-          </Card>
+            </GlassCardContent>
+          </GlassCard>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Transacciones</CardTitle>
-            </CardHeader>
-            <CardContent>
+          <GlassCard>
+            <GlassCardHeader>
+              <GlassCardTitle>Transacciones</GlassCardTitle>
+            </GlassCardHeader>
+            <GlassCardContent>
               {transactions.isLoading ? (
                 <div className="space-y-2">
                   {Array.from({ length: 5 }).map((_, i) => (
@@ -189,8 +189,8 @@ export function ClientLookupPage() {
                   </TableBody>
                 </Table>
               )}
-            </CardContent>
-          </Card>
+            </GlassCardContent>
+          </GlassCard>
         </>
       )}
     </div>
