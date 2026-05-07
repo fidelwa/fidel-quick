@@ -400,11 +400,11 @@ export function ProgramsListPage() {
           <GlassCardContent>
             <Table>
               <TableHeader>
-                <TableRow className="border-white/30 hover:bg-transparent">
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Detalle</TableHead>
-                  <TableHead>Estado</TableHead>
+                <TableRow className="border-b border-white/40 hover:bg-transparent">
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Nombre</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Tipo</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Detalle</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Estado</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -434,14 +434,20 @@ export function ProgramsListPage() {
                       tabIndex={r.href ? 0 : undefined}
                       role={r.href ? "link" : undefined}
                       style={{ ["--row-accent" as string]: meta.accent }}
-                      className={`group border-white/20 transition-[background-color,box-shadow] duration-200 ease-out ${
+                      className={`group border-0 transition-colors duration-200 ease-out ${
                         r.href
-                          ? "cursor-pointer hover:bg-white/55 hover:shadow-[inset_3px_0_0_var(--row-accent)] focus-visible:bg-white/55 focus-visible:shadow-[inset_3px_0_0_var(--row-accent)] focus-visible:outline-none"
+                          ? "cursor-pointer hover:bg-[color-mix(in_oklch,var(--row-accent)_8%,transparent)] focus-visible:bg-[color-mix(in_oklch,var(--row-accent)_8%,transparent)] focus-visible:outline-none"
                           : ""
                       }`}
                     >
-                      <TableCell className="font-medium">{r.name}</TableCell>
-                      <TableCell>
+                      <TableCell
+                        className={`rounded-l-2xl py-4 font-medium transition-shadow duration-200 ${
+                          r.href ? "group-hover:shadow-[inset_4px_0_0_0_var(--row-accent)] group-focus-visible:shadow-[inset_4px_0_0_0_var(--row-accent)]" : ""
+                        }`}
+                      >
+                        {r.name}
+                      </TableCell>
+                      <TableCell className="py-4">
                         <span
                           className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${meta.chip}`}
                         >
@@ -449,13 +455,13 @@ export function ProgramsListPage() {
                           {meta.label}
                         </span>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{r.detail}</TableCell>
-                      <TableCell>
+                      <TableCell className="py-4 text-muted-foreground">{r.detail}</TableCell>
+                      <TableCell className="py-4">
                         <Badge variant={r.active ? "default" : "secondary"}>
                           {r.active ? "Activo" : "Inactivo"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="rounded-r-2xl py-4 text-muted-foreground">
                         {r.href ? (
                           <ChevronRight
                             className="h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[color:var(--row-accent)] group-focus-visible:text-[color:var(--row-accent)]"
