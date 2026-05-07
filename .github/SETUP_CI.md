@@ -24,15 +24,18 @@ for role in \
     roles/iam.serviceAccountUser \
     roles/secretmanager.secretAccessor \
     roles/storage.admin \
-    roles/cloudsql.client; do
+    roles/cloudsql.client \
+    roles/logging.viewer; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:$CI_SA" \
     --role="$role" \
-    --quiet
+    --condition=None --quiet
 done
 ```
 
 > `serviceAccountUser` es necesario para que CI pueda actuar como el SA del Cloud Run runtime (`fidel-quick-sa`).
+>
+> `logging.viewer` es necesario para que `gcloud builds submit` pueda streamear los logs del build. Sin este rol el build sí corre pero el CLI sale con exit 1 y el workflow falla aunque la imagen ya esté en Artifact Registry.
 
 ## 3. Generar JSON key y agregarla como secret en GitHub
 
