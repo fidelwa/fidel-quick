@@ -35,7 +35,17 @@ export function StepReady({
   const qrRef = useRef<HTMLDivElement>(null)
   const [finishing, setFinishing] = useState(false)
 
-  const joinUrl = `https://fidel.app/unirse/${customer?.slug ?? ""}`
+  // En prod: origin = https://fidel-quick-...run.app (o el dominio custom).
+  // En dev: vite corre en :5173 pero /unirse/* solo lo sirve el backend Go
+  // en :8080, así que apuntamos ahí explícitamente. Al subir a un dominio
+  // custom (ej. fidel.app), basta con que ese dominio resuelva al Cloud Run.
+  const joinOrigin =
+    typeof window !== "undefined" && window.location.hostname === "localhost"
+      ? "http://localhost:8080"
+      : typeof window !== "undefined"
+        ? window.location.origin
+        : ""
+  const joinUrl = `${joinOrigin}/unirse/${customer?.slug ?? ""}`
 
   const handleDownloadQR = () => {
     const canvas = qrRef.current?.querySelector("canvas")
