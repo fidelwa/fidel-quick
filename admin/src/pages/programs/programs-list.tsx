@@ -434,16 +434,16 @@ export function ProgramsListPage() {
                       tabIndex={r.href ? 0 : undefined}
                       role={r.href ? "link" : undefined}
                       style={{ ["--row-accent" as string]: meta.accent }}
-                      className={`group relative border-0 transition-[background-color,transform,box-shadow] duration-300 ease-out ${
+                      className={`group border-white/20 transition-[background-color,box-shadow] duration-200 ease-out ${
                         r.href
-                          ? "cursor-pointer hover:bg-white/55 hover:[transform:translateX(4px)] hover:shadow-[inset_3px_0_0_var(--row-accent),0_10px_30px_-12px_color-mix(in_oklch,var(--row-accent)_55%,transparent)] focus-visible:bg-white/55 focus-visible:[transform:translateX(4px)] focus-visible:shadow-[inset_3px_0_0_var(--row-accent),0_10px_30px_-12px_color-mix(in_oklch,var(--row-accent)_55%,transparent)] focus-visible:outline-none"
+                          ? "cursor-pointer hover:bg-white/55 hover:shadow-[inset_3px_0_0_var(--row-accent)] focus-visible:bg-white/55 focus-visible:shadow-[inset_3px_0_0_var(--row-accent)] focus-visible:outline-none"
                           : ""
                       }`}
                     >
                       <TableCell className="font-medium">{r.name}</TableCell>
                       <TableCell>
                         <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-transform duration-300 ease-out group-hover:scale-105 group-focus-visible:scale-105 ${meta.chip}`}
+                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${meta.chip}`}
                         >
                           <Icon className="h-3 w-3" />
                           {meta.label}
@@ -458,7 +458,7 @@ export function ProgramsListPage() {
                       <TableCell className="text-muted-foreground">
                         {r.href ? (
                           <ChevronRight
-                            className="h-4 w-4 transition-all duration-300 ease-out group-hover:translate-x-1 group-hover:text-[color:var(--row-accent)] group-focus-visible:translate-x-1 group-focus-visible:text-[color:var(--row-accent)]"
+                            className="h-4 w-4 transition-colors duration-200 ease-out group-hover:text-[color:var(--row-accent)] group-focus-visible:text-[color:var(--row-accent)]"
                           />
                         ) : null}
                       </TableCell>
