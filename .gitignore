@@ -31,6 +31,14 @@ go.work.sum
 .env.production
 .env.staging
 
+# Terraform — *.tfvars contienen secrets (db_password, tokens). Solo .example se commitea.
+*.tfvars
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfplan
+
 # Editor/IDE
 # .idea/
 # .vscode/

@@ -87,15 +87,34 @@ variable "bearer_token" {
   sensitive   = true
 }
 
-variable "anthropic_api_key" {
-  description = "Anthropic API key for OCR"
+variable "gemini_api_key" {
+  description = "Google Gemini API key for invoice photo processing"
   type        = string
   sensitive   = true
 }
 
-variable "container_image" {
-  description = "Docker image URL (e.g. us-central1-docker.pkg.dev/project/repo/fidel-quick:latest)"
+variable "whatsapp_app_secret" {
+  description = "Meta App Secret for X-Hub-Signature-256 webhook validation (FID-25)"
   type        = string
+  sensitive   = true
+}
+
+variable "google_client_id" {
+  description = "Google OAuth Web Client ID for admin login (FID-11). Public, not sensitive."
+  type        = string
+  default     = ""
+}
+
+variable "bucket_name" {
+  description = "Cloud Storage bucket for invoice photos. Globally unique."
+  type        = string
+  default     = ""
+}
+
+variable "container_image" {
+  description = "Docker image URL. Default placeholder lets terraform apply before the first build; update via gcloud run deploy after."
+  type        = string
+  default     = "gcr.io/cloudrun/hello"
 }
 
 # -----------------------------------------------------------------------------
@@ -181,8 +200,13 @@ resource "google_sql_user" "loyalty" {
 # Cloud Storage — Fotos de tickets
 # -----------------------------------------------------------------------------
 
+locals {
+  # Si bucket_name viene vacío, usa el patrón histórico project-loyalty-invoices.
+  effective_bucket_name = var.bucket_name != "" ? var.bucket_name : "${var.project_id}-loyalty-invoices"
+}
+
 resource "google_storage_bucket" "invoices" {
-  name     = "${var.project_id}-loyalty-invoices"
+  name     = local.effective_bucket_name
   location = var.region
 
   uniform_bucket_level_access = true
@@ -206,9 +230,10 @@ locals {
   secrets = {
     WHATSAPP_API_TOKEN    = var.whatsapp_api_token
     WHATSAPP_VERIFY_TOKEN = var.whatsapp_verify_token
+    WHATSAPP_APP_SECRET   = var.whatsapp_app_secret
     JWT_SECRET            = var.jwt_secret
     BEARER_TOKEN          = var.bearer_token
-    ANTHROPIC_API_KEY     = var.anthropic_api_key
+    GEMINI_API_KEY        = var.gemini_api_key
   }
 }
 
@@ -317,6 +342,10 @@ resource "google_cloud_run_v2_service" "api" {
         value = var.whatsapp_display_phone
       }
       env {
+        name  = "GOOGLE_CLIENT_ID"
+        value = var.google_client_id
+      }
+      env {
         name  = "DATABASE_URL"
         value = "postgres://loyalty:${var.db_password}@/loyalty?host=/cloudsql/${google_sql_database_instance.postgres.connection_name}"
       }
@@ -337,7 +366,7 @@ resource "google_cloud_run_v2_service" "api" {
 
       startup_probe {
         http_get {
-          path = "/health"
+          path = "/healthz"
         }
         initial_delay_seconds = 5
         period_seconds        = 10
