@@ -43,12 +43,18 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Build & push image to Artifact Registry
+        # --gcs-log-dir redirige los logs al bucket _cloudbuild que la SA
+        # ya tiene acceso (storage.admin). Sin esto, gcloud intenta leer
+        # del bucket de logs default (_PROJECT_NUMBER_.cloudbuild-logs...)
+        # que requiere roles/viewer del proyecto entero — y el CLI falla
+        # con exit 1 aunque la imagen sí queda lista en Artifact Registry.
         run: |
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${SERVICE}:${GITHUB_SHA::7}"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           gcloud builds submit \
             --tag="$IMAGE" \
             --project="$PROJECT_ID" \
+            --gcs-log-dir="gs://${PROJECT_ID}_cloudbuild/logs/" \
             .
 
       - name: Deploy to Cloud Run
