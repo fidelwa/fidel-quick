@@ -129,7 +129,7 @@ export function ProgramsListPage() {
       // según cómo se creó; normalizamos a porcentaje para display.
       detail: `${p.cashback_rate > 1 ? p.cashback_rate : p.cashback_rate * 100}% de cashback`,
       active: p.active,
-      href: null,
+      href: `/cashback/${p.id}`,
     })),
     ...(pushcard && pushcard.active
       ? [
