@@ -11,20 +11,36 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/context/auth-context"
+import { usePushcardConfig } from "@/hooks/use-pushcard"
 import { Separator } from "@/components/ui/separator"
 
-const navItems = [
+const baseNavItems = [
   { to: "/", label: "Inicio", icon: Home },
   { to: "/perfil", label: "Mi Negocio", icon: Building2 },
   { to: "/programas", label: "Programas", icon: Trophy },
-  { to: "/pushcard", label: "Tarjeta de sellos", icon: Stamp },
   { to: "/colaboradores", label: "Colaboradores", icon: Users },
   { to: "/clientes", label: "Clientes", icon: UserSearch },
   { to: "/feedback", label: "Feedback", icon: MessageSquare },
 ]
 
+const pushcardNavItem = {
+  to: "/pushcard",
+  label: "Tarjeta de sellos",
+  icon: Stamp,
+}
+
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { logout } = useAuth()
+  const { logout, customerId } = useAuth()
+  const { data: pushcardConfig } = usePushcardConfig(customerId)
+
+  // 'Tarjeta de sellos' solo aparece si el customer tiene pushcard activo.
+  // El endpoint devuelve 404 (no config) o un row con active=false; en ambos
+  // casos ocultamos la entrada para evitar que el admin navegue a una página
+  // de un sisfi que no aplica.
+  const showPushcard = pushcardConfig?.active === true
+  const navItems = showPushcard
+    ? [...baseNavItems.slice(0, 3), pushcardNavItem, ...baseNavItems.slice(3)]
+    : baseNavItems
 
   return (
     <div className="glass-strong flex h-full flex-col rounded-none border-0 text-sidebar-foreground">
