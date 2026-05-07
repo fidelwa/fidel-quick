@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "sonner"
-import { OctagonX } from "lucide-react"
+import { OctagonX, Eye, EyeOff } from "lucide-react"
 import { loginAdmin, loginGoogle, setToken, getOnboarding } from "@/lib/api-client"
 
 export function LoginPage() {
@@ -15,6 +15,7 @@ export function LoginPage() {
   const navigate = useNavigate()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [shake, setShake] = useState(false)
@@ -147,14 +148,25 @@ export function LoginPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Tu password"
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setError("") }}
-                className={error ? "border-destructive/50 focus-visible:ring-destructive/30" : ""}
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Tu password"
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError("") }}
+                  className={`pr-10 ${error ? "border-destructive/50 focus-visible:ring-destructive/30" : ""}`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={showPassword ? "Ocultar password" : "Mostrar password"}
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Verificando..." : "Iniciar sesion"}
