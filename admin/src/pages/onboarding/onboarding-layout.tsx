@@ -6,6 +6,7 @@ import { useCashbackPrograms } from "@/hooks/use-cashback-programs"
 import { useCollaborators } from "@/hooks/use-collaborators"
 import { useRewards } from "@/hooks/use-rewards"
 import { useCashbackRewards } from "@/hooks/use-cashback-rewards"
+import { usePushcardConfig } from "@/hooks/use-pushcard"
 import { useOnboarding } from "@/hooks/use-onboarding"
 import { useOnboardingStatus, useUpdateOnboardingStep } from "@/hooks/use-onboarding-status"
 import { StepIndicator } from "@/components/onboarding/step-indicator"
@@ -23,6 +24,10 @@ export function OnboardingLayout() {
   const { data: programs } = usePrograms(customerId)
   const { data: cashbackPrograms } = useCashbackPrograms(customerId)
   const { data: existingCollaborators } = useCollaborators(customerId)
+  // /pushcard/config devuelve 404 (apperror.NotFound) cuando aún no hay
+  // pushcard creada — useQuery lo expone como error y data = undefined.
+  // Lo tratamos como "no hay" sin spamear toasts.
+  const { data: pushcardFromServer, isLoading: pushcardLoading } = usePushcardConfig(customerId)
 
   const earnBurnProgramFromServer = programs?.[0] ?? null
   const cashbackProgramFromServer = cashbackPrograms?.[0] ?? null
@@ -38,6 +43,9 @@ export function OnboardingLayout() {
     if (recoveryDone.current) return
     // Wait until base queries have resolved
     if (programs === undefined || cashbackPrograms === undefined) return
+    // pushcard responde 404 si no hay config — esperamos isLoading=false
+    // (no data === undefined, porque data nunca llega cuando hay 404).
+    if (pushcardLoading) return
 
     // If there are programs, wait for their rewards to resolve too (sequential fetch)
     if (earnBurnProgramFromServer && existingRewards === undefined) return
@@ -48,6 +56,9 @@ export function OnboardingLayout() {
     }
     if (cashbackProgramFromServer) {
       onboarding.setCashbackProgram(cashbackProgramFromServer)
+    }
+    if (pushcardFromServer) {
+      onboarding.setPushcardConfig(pushcardFromServer)
     }
     if (existingRewards?.length) {
       onboarding.setRewards(existingRewards)
@@ -63,7 +74,10 @@ export function OnboardingLayout() {
     if (onboardingStatus?.current_step && onboardingStatus.current_step > 1) {
       onboarding.goToStep(onboardingStatus.current_step)
     } else {
-      const hasPrograms = (programs?.length ?? 0) > 0 || (cashbackPrograms?.length ?? 0) > 0
+      const hasPrograms =
+        (programs?.length ?? 0) > 0 ||
+        (cashbackPrograms?.length ?? 0) > 0 ||
+        !!pushcardFromServer
       if (hasPrograms) {
         const hasRewards = (existingRewards?.length ?? 0) > 0 || (existingCbRewards?.length ?? 0) > 0
         if (hasRewards) {
@@ -90,6 +104,8 @@ export function OnboardingLayout() {
     existingCbRewards,
     existingCollaborators,
     onboardingStatus,
+    pushcardFromServer,
+    pushcardLoading,
   ])
 
   // Persist step changes to server
@@ -121,7 +137,7 @@ export function OnboardingLayout() {
   }
 
   const completedSteps: number[] = []
-  if (onboarding.earnBurnProgram || onboarding.cashbackProgram) completedSteps.push(1)
+  if (onboarding.earnBurnProgram || onboarding.cashbackProgram || onboarding.pushcardConfig) completedSteps.push(1)
   if (onboarding.rewards.length > 0 || onboarding.cashbackRewards.length > 0) completedSteps.push(2)
   if (onboarding.collaborators.length > 0) completedSteps.push(3)
 
@@ -132,8 +148,10 @@ export function OnboardingLayout() {
           <StepProgram
             earnBurnProgram={onboarding.earnBurnProgram}
             cashbackProgram={onboarding.cashbackProgram}
+            pushcardConfig={onboarding.pushcardConfig}
             onEarnBurnCreated={onboarding.setEarnBurnProgram}
             onCashbackCreated={onboarding.setCashbackProgram}
+            onPushcardCreated={onboarding.setPushcardConfig}
             onNext={onboarding.nextStep}
           />
         )
@@ -142,6 +160,7 @@ export function OnboardingLayout() {
           <StepRewards
             earnBurnProgram={onboarding.earnBurnProgram}
             cashbackProgram={onboarding.cashbackProgram}
+            pushcardConfig={onboarding.pushcardConfig}
             rewards={onboarding.rewards}
             cashbackRewards={onboarding.cashbackRewards}
             onRewardsChange={onboarding.setRewards}
