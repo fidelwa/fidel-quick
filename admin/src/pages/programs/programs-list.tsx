@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 import { useForm } from "react-hook-form"
 import { z } from "zod/v4"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -391,10 +391,28 @@ export function ProgramsListPage() {
                 {rows.map((r) => {
                   const meta = TYPE_META[r.type]
                   const Icon = meta.icon
+                  // Whole-row navigation when there's a detail page; we use
+                  // useNavigate (rather than wrapping each TableCell in a Link)
+                  // because anchor tags inside a <tr> are invalid HTML.
+                  const onRowActivate = r.href
+                    ? () => navigate(r.href as string)
+                    : undefined
+                  const onRowKeyDown = r.href
+                    ? (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          navigate(r.href as string)
+                        }
+                      }
+                    : undefined
                   return (
                     <TableRow
                       key={`${r.type}:${r.id}`}
-                      className="border-white/20 hover:bg-white/30"
+                      onClick={onRowActivate}
+                      onKeyDown={onRowKeyDown}
+                      tabIndex={r.href ? 0 : undefined}
+                      role={r.href ? "link" : undefined}
+                      className={`border-white/20 hover:bg-white/30 ${r.href ? "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" : ""}`}
                     >
                       <TableCell className="font-medium">{r.name}</TableCell>
                       <TableCell>
@@ -411,14 +429,8 @@ export function ProgramsListPage() {
                           {r.active ? "Activo" : "Inactivo"}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        {r.href ? (
-                          <Button variant="ghost" size="icon" asChild>
-                            <Link to={r.href}>
-                              <ChevronRight className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                        ) : null}
+                      <TableCell className="text-muted-foreground">
+                        {r.href ? <ChevronRight className="h-4 w-4" /> : null}
                       </TableCell>
                     </TableRow>
                   )
