@@ -1,13 +1,15 @@
 import { useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { useForm } from "react-hook-form"
 import { z } from "zod/v4"
 import { zodResolver } from "@hookform/resolvers/zod"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { useAuth } from "@/context/auth-context"
 import { usePrograms, useCreateProgram } from "@/hooks/use-programs"
-import { useCashbackPrograms } from "@/hooks/use-cashback-programs"
+import { useCashbackPrograms, useCreateCashbackProgram } from "@/hooks/use-cashback-programs"
 import { usePushcardConfig } from "@/hooks/use-pushcard"
+import { createCustomerSisfi, upsertPushcardConfig } from "@/lib/api-client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -39,16 +41,29 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Plus, ChevronRight, Star, Wallet, Stamp } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { formatPoints } from "@/lib/utils"
 
-const createSchema = z.object({
+const earnBurnSchema = z.object({
   name: z.string().min(1, "El nombre es requerido"),
   points_ratio: z.number().int().min(1, "Debe ser al menos 1"),
 })
 
-type CreateFormValues = z.infer<typeof createSchema>
+const cashbackSchema = z.object({
+  name: z.string().min(1, "El nombre es requerido"),
+  cashback_rate: z.number().min(0.1, "Debe ser mayor a 0").max(100, "Maximo 100%"),
+})
+
+const pushcardSchema = z.object({
+  name: z.string().min(1, "El nombre es requerido"),
+  card_slots: z.number().int().min(1, "Minimo 1 sello").max(50, "Maximo 50"),
+})
+
+type EarnBurnFormValues = z.infer<typeof earnBurnSchema>
+type CashbackFormValues = z.infer<typeof cashbackSchema>
+type PushcardFormValues = z.infer<typeof pushcardSchema>
 
 type SisfiType = "earn_burn" | "cashback" | "pushcard"
 
@@ -69,10 +84,27 @@ const TYPE_META: Record<SisfiType, { label: string; icon: LucideIcon; chip: stri
 
 export function ProgramsListPage() {
   const { customerId } = useAuth()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { data: earnBurn, isLoading: loadingEB } = usePrograms(customerId)
   const { data: cashback, isLoading: loadingCB } = useCashbackPrograms(customerId)
   const { data: pushcard, isLoading: loadingPC } = usePushcardConfig(customerId)
   const createProgram = useCreateProgram()
+  const createCashback = useCreateCashbackProgram()
+  const createPushcard = useMutation({
+    mutationFn: async (values: PushcardFormValues) => {
+      const cs = await createCustomerSisfi({
+        customer_id: customerId,
+        sisfi_id: "pushcard",
+        name: values.name,
+      })
+      await upsertPushcardConfig(cs.id, { card_slots: values.card_slots })
+      return cs
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pushcard-config"] })
+    },
+  })
   const [open, setOpen] = useState(false)
 
   const isLoading = loadingEB || loadingCB || loadingPC
@@ -113,13 +145,26 @@ export function ProgramsListPage() {
       : []),
   ]
 
-  const onSubmit = (values: CreateFormValues) => {
+  const earnForm = useForm<EarnBurnFormValues>({
+    resolver: zodResolver(earnBurnSchema),
+    defaultValues: { name: "", points_ratio: 15 },
+  })
+  const cashbackForm = useForm<CashbackFormValues>({
+    resolver: zodResolver(cashbackSchema),
+    defaultValues: { name: "", cashback_rate: 5 },
+  })
+  const pushcardForm = useForm<PushcardFormValues>({
+    resolver: zodResolver(pushcardSchema),
+    defaultValues: { name: "Tarjeta de sellos", card_slots: 10 },
+  })
+
+  const onCreateEarnBurn = (values: EarnBurnFormValues) => {
     createProgram.mutate(
       { ...values, customer_id: customerId },
       {
         onSuccess: () => {
-          toast.success("Programa creado")
-          form.reset()
+          toast.success("Programa de puntos creado")
+          earnForm.reset()
           setOpen(false)
         },
         onError: (err) => toast.error(err.message),
@@ -127,10 +172,31 @@ export function ProgramsListPage() {
     )
   }
 
-  const form = useForm<CreateFormValues>({
-    resolver: zodResolver(createSchema),
-    defaultValues: { name: "", points_ratio: 15 },
-  })
+  const onCreateCashback = (values: CashbackFormValues) => {
+    createCashback.mutate(
+      { ...values, customer_id: customerId },
+      {
+        onSuccess: () => {
+          toast.success("Programa de cashback creado")
+          cashbackForm.reset()
+          setOpen(false)
+        },
+        onError: (err) => toast.error(err.message),
+      },
+    )
+  }
+
+  const onCreatePushcard = (values: PushcardFormValues) => {
+    createPushcard.mutate(values, {
+      onSuccess: () => {
+        toast.success("Tarjeta de sellos creada")
+        pushcardForm.reset({ name: "Tarjeta de sellos", card_slots: 10 })
+        setOpen(false)
+        navigate("/pushcard")
+      },
+      onError: (err) => toast.error(err.message),
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -145,46 +211,150 @@ export function ProgramsListPage() {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Crear programa de puntos</DialogTitle>
+              <DialogTitle>Crear programa</DialogTitle>
             </DialogHeader>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Nombre</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Mi programa de puntos" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="points_ratio"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>1 punto por cada $</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min={1}
-                          {...field}
-                          onChange={(e) => field.onChange(Number(e.target.value))}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <Button type="submit" disabled={createProgram.isPending}>
-                  {createProgram.isPending ? "Creando..." : "Crear"}
-                </Button>
-              </form>
-            </Form>
+            <Tabs defaultValue="earn_burn" className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="earn_burn">
+                  <Star className="mr-2 h-4 w-4" /> Puntos
+                </TabsTrigger>
+                <TabsTrigger value="cashback">
+                  <Wallet className="mr-2 h-4 w-4" /> Cashback
+                </TabsTrigger>
+                <TabsTrigger value="pushcard" disabled={!!pushcard}>
+                  <Stamp className="mr-2 h-4 w-4" /> Sellos
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="earn_burn" className="mt-4">
+                <Form {...earnForm}>
+                  <form onSubmit={earnForm.handleSubmit(onCreateEarnBurn)} className="space-y-4">
+                    <FormField
+                      control={earnForm.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Nombre</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Programa de puntos" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={earnForm.control}
+                      name="points_ratio"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>1 punto por cada $</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              min={1}
+                              {...field}
+                              onChange={(e) => field.onChange(Number(e.target.value))}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <Button type="submit" disabled={createProgram.isPending}>
+                      {createProgram.isPending ? "Creando..." : "Crear programa de puntos"}
+                    </Button>
+                  </form>
+                </Form>
+              </TabsContent>
+              <TabsContent value="cashback" className="mt-4">
+                <Form {...cashbackForm}>
+                  <form onSubmit={cashbackForm.handleSubmit(onCreateCashback)} className="space-y-4">
+                    <FormField
+                      control={cashbackForm.control}
+                      name="name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Nombre</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Programa de cashback" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={cashbackForm.control}
+                      name="cashback_rate"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>% de cashback</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              min={0.1}
+                              max={100}
+                              step={0.1}
+                              {...field}
+                              onChange={(e) => field.onChange(Number(e.target.value))}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <Button type="submit" disabled={createCashback.isPending}>
+                      {createCashback.isPending ? "Creando..." : "Crear programa de cashback"}
+                    </Button>
+                  </form>
+                </Form>
+              </TabsContent>
+              <TabsContent value="pushcard" className="mt-4">
+                {pushcard ? (
+                  <p className="text-sm text-muted-foreground">
+                    Ya tienes una tarjeta de sellos configurada. Solo se permite una por negocio.
+                  </p>
+                ) : (
+                  <Form {...pushcardForm}>
+                    <form onSubmit={pushcardForm.handleSubmit(onCreatePushcard)} className="space-y-4">
+                      <FormField
+                        control={pushcardForm.control}
+                        name="name"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Nombre</FormLabel>
+                            <FormControl>
+                              <Input placeholder="Tarjeta de sellos" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={pushcardForm.control}
+                        name="card_slots"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Sellos para completar</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                min={1}
+                                max={50}
+                                {...field}
+                                onChange={(e) => field.onChange(Number(e.target.value))}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <Button type="submit" disabled={createPushcard.isPending}>
+                        {createPushcard.isPending ? "Creando..." : "Crear tarjeta de sellos"}
+                      </Button>
+                    </form>
+                  </Form>
+                )}
+              </TabsContent>
+            </Tabs>
           </DialogContent>
         </Dialog>
       </div>
