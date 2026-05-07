@@ -349,6 +349,25 @@ func (s *Service) ListPrograms(ctx context.Context, customerID string) ([]Cashba
 	return programs, nil
 }
 
+// CreateProgram activates cashback for a customer. Accepts cashback_rate either as
+// a percentage (e.g. 5 for 5%) or as a fraction (e.g. 0.05); both are normalized to
+// the fraction stored in config_cashback (DECIMAL(5,4) CHECK > 0 AND <= 1).
+func (s *Service) CreateProgram(ctx context.Context, p *CashbackProgram) error {
+	if p.CustomerID == "" || p.Name == "" || p.CashbackRate <= 0 {
+		return apperror.BadRequest("customer_id, name y cashback_rate (>0) son requeridos", nil)
+	}
+	if p.CashbackRate > 1 {
+		p.CashbackRate = p.CashbackRate / 100
+	}
+	if p.CashbackRate > 1 || p.CashbackRate <= 0 {
+		return apperror.BadRequest("cashback_rate debe estar entre 0 y 1 (o entre 0 y 100 si es porcentaje)", nil)
+	}
+	if err := s.repo.CreateProgram(ctx, p); err != nil {
+		return apperror.Internal("error al crear programa cashback", err)
+	}
+	return nil
+}
+
 func (s *Service) ListAllRewards(ctx context.Context, customerSisfiID string) ([]CashbackReward, error) {
 	rewards, err := s.repo.ListAllRewards(ctx, customerSisfiID)
 	if err != nil {
