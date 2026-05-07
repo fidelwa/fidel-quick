@@ -440,11 +440,7 @@ export function ProgramsListPage() {
                           : ""
                       }`}
                     >
-                      <TableCell
-                        className={`rounded-l-2xl py-4 font-medium transition-shadow duration-200 ${
-                          r.href ? "group-hover:shadow-[inset_4px_0_0_0_var(--row-accent)] group-focus-visible:shadow-[inset_4px_0_0_0_var(--row-accent)]" : ""
-                        }`}
-                      >
+                      <TableCell className="rounded-l-2xl py-4 font-medium">
                         {r.name}
                       </TableCell>
                       <TableCell className="py-4">
