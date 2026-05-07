@@ -6,11 +6,13 @@ import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { Gift, Loader2, Plus, Upload, Check } from "lucide-react"
 import * as XLSX from "xlsx"
-import type { Program, CashbackProgram, Reward, CashbackReward } from "@/types"
+import type { Program, CashbackProgram, PushcardConfig, Reward, CashbackReward } from "@/types"
 
 interface StepRewardsProps {
   earnBurnProgram: Program | null
   cashbackProgram: CashbackProgram | null
+  // Opcional para no romper tests existentes; en runtime siempre llega.
+  pushcardConfig?: PushcardConfig | null
   rewards: Reward[]
   cashbackRewards: CashbackReward[]
   onRewardsChange: (rewards: Reward[]) => void
@@ -33,6 +35,7 @@ interface ExcelRewardRow {
 export function StepRewards({
   earnBurnProgram,
   cashbackProgram,
+  pushcardConfig = null,
   rewards,
   cashbackRewards,
   onRewardsChange,
@@ -214,7 +217,11 @@ export function StepRewards({
   }
 
   const handleNext = () => {
-    if (totalRewards === 0) {
+    // Si solo hay pushcard (sin earnburn ni cashback), no hace falta crear
+    // recompensas en este step — la recompensa de pushcard se configura
+    // luego en /admin/pushcard.
+    const onlyPushcard = !earnBurnProgram && !cashbackProgram && !!pushcardConfig
+    if (!onlyPushcard && totalRewards === 0) {
       toast.error("Crea al menos una recompensa")
       return
     }
@@ -229,6 +236,15 @@ export function StepRewards({
           Agrega las recompensas que tus clientes podran obtener
         </p>
       </div>
+
+      {/* Pushcard solo: no hay rewards en este step */}
+      {!earnBurnProgram && !cashbackProgram && pushcardConfig && (
+        <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+          Tu programa de tarjeta de sellos no necesita recompensas en este paso.
+          Configura la recompensa al completar la tarjeta luego desde
+          <span className="mx-1 font-medium text-foreground">/admin/pushcard</span>.
+        </div>
+      )}
 
       {/* Earn-Burn Rewards */}
       {earnBurnProgram && (

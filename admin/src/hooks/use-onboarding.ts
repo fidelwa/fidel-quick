@@ -1,11 +1,12 @@
 import { useState, useCallback } from "react"
-import type { Program, CashbackProgram, Reward, CashbackReward, Collaborator } from "@/types"
+import type { Program, CashbackProgram, Reward, CashbackReward, Collaborator, PushcardConfig } from "@/types"
 
 export interface OnboardingState {
   currentStep: number
   direction: "forward" | "backward"
   earnBurnProgram: Program | null
   cashbackProgram: CashbackProgram | null
+  pushcardConfig: PushcardConfig | null
   rewards: Reward[]
   cashbackRewards: CashbackReward[]
   collaborators: Collaborator[]
@@ -16,6 +17,7 @@ const initialState: OnboardingState = {
   direction: "forward",
   earnBurnProgram: null,
   cashbackProgram: null,
+  pushcardConfig: null,
   rewards: [],
   cashbackRewards: [],
   collaborators: [],
@@ -59,6 +61,10 @@ export function useOnboarding(initialStep?: number) {
     setState((s) => ({ ...s, cashbackProgram: program }))
   }, [])
 
+  const setPushcardConfig = useCallback((config: PushcardConfig | null) => {
+    setState((s) => ({ ...s, pushcardConfig: config }))
+  }, [])
+
   const setRewards = useCallback((rewards: Reward[]) => {
     setState((s) => ({ ...s, rewards }))
   }, [])
@@ -78,6 +84,7 @@ export function useOnboarding(initialStep?: number) {
     goToStep,
     setEarnBurnProgram,
     setCashbackProgram,
+    setPushcardConfig,
     setRewards,
     setCashbackRewards,
     setCollaborators,
