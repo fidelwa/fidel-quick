@@ -466,7 +466,7 @@ func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string
 		`SELECT cs.id, cs.customer_id, cs.name, cc.cashback_rate, cs.active
 		 FROM customer_sisfi cs
 		 JOIN config_cashback cc ON cc.customer_sisfi_id = cs.id
-		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'cashback'
+		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'cashback' AND cs.active = true
 		 ORDER BY cs.created_at`,
 		customerID)
 	if err != nil {
