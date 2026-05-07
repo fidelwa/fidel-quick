@@ -15,7 +15,7 @@ export function useCreateReward(programId: string) {
   return useMutation({
     mutationFn: async (data: { name: string; description: string; points_cost: number }) => {
       const resp = await createReward(programId, data)
-      return { customer_sisfi_id: programId, active: true, ...data, ...resp } as Reward
+      return { ...data, ...resp } as Reward
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rewards", programId] })

@@ -4,7 +4,7 @@ import { useCreateCashbackReward } from "@/hooks/use-cashback-rewards"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
-import { Gift, Loader2, Plus, Upload, Check, Trash2 } from "lucide-react"
+import { Gift, Loader2, Plus, Upload, Check } from "lucide-react"
 import * as XLSX from "xlsx"
 import type { Program, CashbackProgram, Reward, CashbackReward } from "@/types"
 
@@ -211,14 +211,6 @@ export function StepRewards({
     } finally {
       setImporting(false)
     }
-  }
-
-  const handleRemoveReward = (id: string) => {
-    onRewardsChange(rewards.filter((r) => r.id !== id))
-  }
-
-  const handleRemoveCbReward = (id: string) => {
-    onCashbackRewardsChange(cashbackRewards.filter((r) => r.id !== id))
   }
 
   const handleNext = () => {

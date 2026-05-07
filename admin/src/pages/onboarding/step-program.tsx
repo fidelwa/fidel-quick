@@ -231,7 +231,7 @@ export function StepProgram({
                   min={1}
                   max={100}
                   value={cashbackRate}
-                  onChange={(e) => setCashbackRate(Number(e.target.value))}
+                  onChange={(e) => setCashbackRate(e.target.value)}
                   disabled={!!cashbackProgram}
                 />
               </div>
