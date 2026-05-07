@@ -57,6 +57,7 @@ Ver `README.md` para arquitectura y naming. Reglas adicionales:
 - Migraciones `golang-migrate` numeradas secuencialmente (`NNNNNN_descripcion.up.sql` / `.down.sql`).
 - Nuevos sisfi viven en `internal/modules/<nombre>/` y se registran en `loyalty.Registry` desde `main.go`.
 - ER diagram (`docs/erd.mmd`) debe actualizarse cada vez que se agregan/quitan tablas.
+- **Commits**: seguir [Conventional Commits](.github/COMMIT_CONVENTION.md) — formato `tipo(scope): subject` con footer `Refs: Notion FID-N`. Habilita el template con `git config commit.template .gitmessage`.
 
 ## MVP target
 

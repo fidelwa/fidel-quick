@@ -1,0 +1,24 @@
+# <tipo>[(scope)][!]: <subject — imperativo, ≤72 chars, sin punto>
+#
+# Tipos: feat, fix, chore, refactor, docs, style, test, perf, build, ci, revert
+# Scopes comunes: auth, whatsapp, wizard, pushcard, admin, dashboard, terraform, docker, ci
+# Agrega `!` para breaking changes.
+#
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# <body — explica el "por qué", no el "qué". Wrap a 72 columnas.>
+#
+# - Cambio 1
+# - Cambio 2
+#
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# Refs: Notion FID-N https://www.notion.so/...
+# Plan: ~/.claude/plans/<plan>.md (Fase X)
+# Closes #N
+# BREAKING CHANGE: <descripción si aplica>
+#
+# Co-Authored-By: <nombre> <email>
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# Guía completa: .github/COMMIT_CONVENTION.md
