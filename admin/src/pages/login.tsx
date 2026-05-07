@@ -83,8 +83,14 @@ export function LoginPage() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className={`w-full max-w-md transition-transform ${shake ? "animate-[shake_0.4s_ease-in-out]" : ""}`}>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
+      {/* Glass background: gradient + soft color blobs */}
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-br from-violet-100 via-sky-50 to-pink-100 dark:from-violet-950 dark:via-slate-950 dark:to-pink-950" />
+      <div className="pointer-events-none absolute -left-32 -top-32 -z-10 h-96 w-96 rounded-full bg-purple-400/40 blur-3xl dark:bg-purple-700/30" />
+      <div className="pointer-events-none absolute -bottom-32 -right-32 -z-10 h-96 w-96 rounded-full bg-sky-400/40 blur-3xl dark:bg-sky-700/30" />
+      <div className="pointer-events-none absolute left-1/3 top-1/2 -z-10 h-72 w-72 rounded-full bg-pink-400/30 blur-3xl dark:bg-pink-700/20" />
+
+      <Card className={`relative w-full max-w-md border-white/30 bg-white/40 shadow-2xl shadow-purple-500/10 backdrop-blur-2xl transition-transform dark:border-white/10 dark:bg-white/5 ${shake ? "animate-[shake_0.4s_ease-in-out]" : ""}`}>
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">Fidel Admin</CardTitle>
           <CardDescription>
@@ -121,7 +127,7 @@ export function LoginPage() {
                   <span className="w-full border-t" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card px-2 text-muted-foreground">o</span>
+                  <span className="bg-white/40 px-2 text-muted-foreground backdrop-blur-sm dark:bg-white/5">o</span>
                 </div>
               </div>
             </>
