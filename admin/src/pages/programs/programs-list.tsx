@@ -6,10 +6,16 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
 import { useAuth } from "@/context/auth-context"
 import { usePrograms, useCreateProgram } from "@/hooks/use-programs"
+import { useCashbackPrograms } from "@/hooks/use-cashback-programs"
+import { usePushcardConfig } from "@/hooks/use-pushcard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  GlassCard,
+  GlassCardContent,
+} from "@/components/ui/glass-card"
 import {
   Table,
   TableBody,
@@ -33,7 +39,8 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
-import { Plus, ChevronRight } from "lucide-react"
+import { Plus, ChevronRight, Star, Wallet, Stamp } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import { formatPoints } from "@/lib/utils"
 
 const createSchema = z.object({
@@ -43,16 +50,68 @@ const createSchema = z.object({
 
 type CreateFormValues = z.infer<typeof createSchema>
 
+type SisfiType = "earn_burn" | "cashback" | "pushcard"
+
+type ProgramRow = {
+  id: string
+  type: SisfiType
+  name: string
+  detail: string
+  active: boolean
+  href: string | null
+}
+
+const TYPE_META: Record<SisfiType, { label: string; icon: LucideIcon; chip: string }> = {
+  earn_burn: { label: "Puntos", icon: Star, chip: "bg-[#E0B0CC]/40 text-[#8a3d6a]" },
+  cashback: { label: "Cashback", icon: Wallet, chip: "bg-[#A8CDE0]/40 text-[#2c5d75]" },
+  pushcard: { label: "Tarjeta de sellos", icon: Stamp, chip: "bg-[#B49DD9]/35 text-[#5b3d8a]" },
+}
+
 export function ProgramsListPage() {
   const { customerId } = useAuth()
-  const { data: programs, isLoading } = usePrograms(customerId)
+  const { data: earnBurn, isLoading: loadingEB } = usePrograms(customerId)
+  const { data: cashback, isLoading: loadingCB } = useCashbackPrograms(customerId)
+  const { data: pushcard, isLoading: loadingPC } = usePushcardConfig(customerId)
   const createProgram = useCreateProgram()
   const [open, setOpen] = useState(false)
 
-  const form = useForm<CreateFormValues>({
-    resolver: zodResolver(createSchema),
-    defaultValues: { name: "", points_ratio: 15 },
-  })
+  const isLoading = loadingEB || loadingCB || loadingPC
+
+  // Combinar todos los sisfis del customer en filas unificadas.
+  // El backend ya filtra active=true en list (FID-18); pushcard llega
+  // como objeto único — solo lo mostramos si active.
+  const rows: ProgramRow[] = [
+    ...(earnBurn ?? []).map<ProgramRow>((p) => ({
+      id: p.id,
+      type: "earn_burn",
+      name: p.name,
+      detail: `1 pt / $${formatPoints(p.points_ratio)}`,
+      active: p.active,
+      href: `/programas/${p.id}`,
+    })),
+    ...(cashback ?? []).map<ProgramRow>((p) => ({
+      id: p.id,
+      type: "cashback",
+      name: p.name,
+      // El backend devuelve la rate como fracción (0.05) o porcentaje (5)
+      // según cómo se creó; normalizamos a porcentaje para display.
+      detail: `${p.cashback_rate > 1 ? p.cashback_rate : p.cashback_rate * 100}% de cashback`,
+      active: p.active,
+      href: null,
+    })),
+    ...(pushcard && pushcard.active
+      ? [
+          {
+            id: pushcard.customer_sisfi_id,
+            type: "pushcard" as const,
+            name: pushcard.name,
+            detail: `${pushcard.card_slots} sellos para canjear`,
+            active: pushcard.active,
+            href: "/pushcard",
+          } satisfies ProgramRow,
+        ]
+      : []),
+  ]
 
   const onSubmit = (values: CreateFormValues) => {
     createProgram.mutate(
@@ -64,14 +123,19 @@ export function ProgramsListPage() {
           setOpen(false)
         },
         onError: (err) => toast.error(err.message),
-      }
+      },
     )
   }
+
+  const form = useForm<CreateFormValues>({
+    resolver: zodResolver(createSchema),
+    defaultValues: { name: "", points_ratio: 15 },
+  })
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Programas Earn-Burn</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Programas</h1>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button>
@@ -81,7 +145,7 @@ export function ProgramsListPage() {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Crear programa</DialogTitle>
+              <DialogTitle>Crear programa de puntos</DialogTitle>
             </DialogHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -105,7 +169,12 @@ export function ProgramsListPage() {
                     <FormItem>
                       <FormLabel>1 punto por cada $</FormLabel>
                       <FormControl>
-                        <Input type="number" min={1} {...field} onChange={(e) => field.onChange(Number(e.target.value))} />
+                        <Input
+                          type="number"
+                          min={1}
+                          {...field}
+                          onChange={(e) => field.onChange(Number(e.target.value))}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -126,41 +195,68 @@ export function ProgramsListPage() {
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
-      ) : !programs?.length ? (
-        <div className="rounded-lg border border-dashed p-8 text-center">
-          <p className="text-muted-foreground">No hay programas aun. Crea el primero.</p>
-        </div>
+      ) : rows.length === 0 ? (
+        <GlassCard>
+          <GlassCardContent>
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No hay programas activos. Activa un sistema de fidelizacion desde el wizard
+              de onboarding.
+            </p>
+          </GlassCardContent>
+        </GlassCard>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>1 punto por</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead className="w-10" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {programs.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell className="font-medium">{p.name}</TableCell>
-                <TableCell>${formatPoints(p.points_ratio)}</TableCell>
-                <TableCell>
-                  <Badge variant={p.active ? "default" : "secondary"}>
-                    {p.active ? "Activo" : "Inactivo"}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="icon" asChild>
-                    <Link to={`/programas/${p.id}`}>
-                      <ChevronRight className="h-4 w-4" />
-                    </Link>
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <GlassCard>
+          <GlassCardContent>
+            <Table>
+              <TableHeader>
+                <TableRow className="border-white/30 hover:bg-transparent">
+                  <TableHead>Nombre</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Detalle</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="w-10" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r) => {
+                  const meta = TYPE_META[r.type]
+                  const Icon = meta.icon
+                  return (
+                    <TableRow
+                      key={`${r.type}:${r.id}`}
+                      className="border-white/20 hover:bg-white/30"
+                    >
+                      <TableCell className="font-medium">{r.name}</TableCell>
+                      <TableCell>
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${meta.chip}`}
+                        >
+                          <Icon className="h-3 w-3" />
+                          {meta.label}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{r.detail}</TableCell>
+                      <TableCell>
+                        <Badge variant={r.active ? "default" : "secondary"}>
+                          {r.active ? "Activo" : "Inactivo"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {r.href ? (
+                          <Button variant="ghost" size="icon" asChild>
+                            <Link to={r.href}>
+                              <ChevronRight className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </GlassCardContent>
+        </GlassCard>
       )}
     </div>
   )
