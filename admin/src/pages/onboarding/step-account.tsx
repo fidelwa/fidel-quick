@@ -297,18 +297,18 @@ export function StepAccount({
         </p>
       </div>
 
-      {/* Summary card — más bonita, con badges + íconos */}
+      {/* Summary card — contenido centrado */}
       <div className="rounded-xl border bg-card p-5 shadow-sm">
-        <div className="space-y-1">
+        <div className="flex flex-col items-center space-y-1 text-center">
           <div className="text-base font-semibold">{businessInfo.name}</div>
-          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <div className="flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
             <Phone className="h-3.5 w-3.5" />
             <span>{fullPhone}</span>
           </div>
         </div>
 
         {(earnBurnDraft || cashbackDraft || pushcardDraft) && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-wrap justify-center gap-1.5">
             {earnBurnDraft && (
               <Badge variant="secondary" className="gap-1">
                 <Star className="h-3 w-3" />
@@ -331,14 +331,14 @@ export function StepAccount({
         )}
 
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
+          <div className="flex items-center justify-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
             <Gift className="h-3.5 w-3.5 text-muted-foreground" />
             <span>
               <span className="font-semibold text-foreground">{totalRewards}</span>{" "}
               recompensa{totalRewards === 1 ? "" : "s"}
             </span>
           </div>
-          <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
+          <div className="flex items-center justify-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
             <Users className="h-3.5 w-3.5 text-muted-foreground" />
             <span>
               <span className="font-semibold text-foreground">{collaboratorDrafts.length}</span>{" "}
