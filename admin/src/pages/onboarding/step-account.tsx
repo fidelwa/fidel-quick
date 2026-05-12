@@ -3,8 +3,23 @@ import { GoogleLogin, type CredentialResponse } from "@react-oauth/google"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
-import { Eye, EyeOff, Loader2, Mail, OctagonX } from "lucide-react"
+import {
+  Eye,
+  EyeOff,
+  Loader2,
+  Mail,
+  OctagonX,
+  Phone,
+  Star,
+  Wallet,
+  Stamp,
+  Gift,
+  Users,
+  Copy,
+  ClipboardPaste,
+} from "lucide-react"
 import { useAuth } from "@/context/auth-context"
 import {
   onboardingRegister,
@@ -45,10 +60,29 @@ interface StepAccountProps {
   onPrev: () => void
 }
 
+function getPasswordStrength(password: string) {
+  let score = 0
+  if (password.length >= 8) score++
+  if (/[a-z]/.test(password)) score++
+  if (/[A-Z]/.test(password)) score++
+  if (/[0-9]/.test(password)) score++
+  if (/[^a-zA-Z0-9]/.test(password)) score++
+
+  const levels = [
+    { label: "", color: "" },
+    { label: "Muy debil", color: "#ef4444" },
+    { label: "Debil", color: "#f97316" },
+    { label: "Aceptable", color: "#eab308" },
+    { label: "Fuerte", color: "#22c55e" },
+    { label: "Muy fuerte", color: "#16a34a" },
+  ]
+
+  return { score, ...levels[score] }
+}
+
 // Crea todos los recursos del wizard en secuencia con el JWT recién
 // obtenido. Si falla a mitad de camino, el customer + admin ya están
-// creados (auth OK), y se devuelve el customer_id para que el caller
-// pueda decidir cómo recuperar (mostrar dashboard, retry, etc.).
+// creados (auth OK), y el caller decide cómo recuperar.
 async function batchCreateEntities(args: {
   customerId: string
   earnBurnDraft: EarnBurnDraft | null
@@ -145,10 +179,33 @@ export function StepAccount({
   const [password, setPassword] = useState("")
   const [confirm, setConfirm] = useState("")
   const [showPwd, setShowPwd] = useState(false)
+  const [showConfirmPwd, setShowConfirmPwd] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
   const fullPhone = businessInfo.country_code + businessInfo.phone
+  const strength = getPasswordStrength(password)
+  const totalRewards = rewardDrafts.length + cashbackRewardDrafts.length
+
+  const copyToClipboard = async (value: string) => {
+    if (!value) return
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success("Copiado al portapapeles")
+    } catch {
+      toast.error("No se pudo copiar")
+    }
+  }
+
+  const pasteIntoConfirm = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      setConfirm(text)
+      setError("")
+    } catch {
+      toast.error("No se pudo pegar")
+    }
+  }
 
   const finishAuth = async (token: string, customerId: string, adminEmail: string) => {
     // setToken para que el request() del api-client adjunte el header.
@@ -166,15 +223,12 @@ export function StepAccount({
       })
       onSuccess()
     } catch (err) {
-      // Cuenta creada OK pero algo falló al crear programas/rewards/etc.
-      // El usuario ya está logueado — puede recuperar desde el dashboard.
       toast.error(
         err instanceof Error
           ? `Cuenta creada, pero hubo un error: ${err.message}. Puedes terminar de configurar desde el panel.`
           : "Cuenta creada con errores. Termina de configurar desde el panel.",
         { duration: 6000 }
       )
-      // Igual avanzamos — el usuario está logueado.
       onSuccess()
     }
   }
@@ -209,7 +263,7 @@ export function StepAccount({
       return
     }
     if (password.length < 8) {
-      setError("La password debe tener mínimo 8 caracteres")
+      setError("La password debe tener minimo 8 caracteres")
       return
     }
     if (password !== confirm) {
@@ -234,34 +288,63 @@ export function StepAccount({
     }
   }
 
-  // Resumen de lo que se va a crear
-  const summaryItems: string[] = []
-  if (earnBurnDraft) summaryItems.push(`Puntos (${earnBurnDraft.name})`)
-  if (cashbackDraft) summaryItems.push(`Cashback ${cashbackDraft.cashback_rate}% (${cashbackDraft.name})`)
-  if (pushcardDraft) summaryItems.push(`Tarjeta de ${pushcardDraft.card_slots} sellos`)
-  const totalRewards = rewardDrafts.length + cashbackRewardDrafts.length
-
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Casi listo. Crea tu cuenta de administrador</h2>
-        <p className="text-sm text-muted-foreground">
-          Te logueas con Google o con email/password. La cuenta queda
-          asociada al negocio "{businessInfo.name}".
+    <div className="mx-auto w-full max-w-md space-y-6">
+      <div className="text-center">
+        <h2 className="text-xl font-semibold">Casi listo</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Crea tu cuenta de administrador para finalizar
         </p>
       </div>
 
-      {/* Summary */}
-      <div className="rounded-lg border bg-muted/30 p-4 text-sm">
-        <div className="font-medium">{businessInfo.name}</div>
-        <div className="text-muted-foreground">{fullPhone}</div>
-        {summaryItems.length > 0 && (
-          <ul className="mt-2 list-disc space-y-0.5 pl-5 text-muted-foreground">
-            {summaryItems.map((s) => <li key={s}>{s}</li>)}
-          </ul>
+      {/* Summary card — más bonita, con badges + íconos */}
+      <div className="rounded-xl border bg-card p-5 shadow-sm">
+        <div className="space-y-1">
+          <div className="text-base font-semibold">{businessInfo.name}</div>
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Phone className="h-3.5 w-3.5" />
+            <span>{fullPhone}</span>
+          </div>
+        </div>
+
+        {(earnBurnDraft || cashbackDraft || pushcardDraft) && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {earnBurnDraft && (
+              <Badge variant="secondary" className="gap-1">
+                <Star className="h-3 w-3" />
+                {earnBurnDraft.name}
+              </Badge>
+            )}
+            {cashbackDraft && (
+              <Badge variant="secondary" className="gap-1">
+                <Wallet className="h-3 w-3" />
+                {cashbackDraft.cashback_rate}% cashback
+              </Badge>
+            )}
+            {pushcardDraft && (
+              <Badge variant="secondary" className="gap-1">
+                <Stamp className="h-3 w-3" />
+                {pushcardDraft.card_slots} sellos
+              </Badge>
+            )}
+          </div>
         )}
-        <div className="mt-2 text-xs text-muted-foreground">
-          {totalRewards} recompensa{totalRewards === 1 ? "" : "s"} · {collaboratorDrafts.length} colaborador{collaboratorDrafts.length === 1 ? "" : "es"}
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
+            <Gift className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>
+              <span className="font-semibold text-foreground">{totalRewards}</span>{" "}
+              recompensa{totalRewards === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs">
+            <Users className="h-3.5 w-3.5 text-muted-foreground" />
+            <span>
+              <span className="font-semibold text-foreground">{collaboratorDrafts.length}</span>{" "}
+              colaborador{collaboratorDrafts.length === 1 ? "" : "es"}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -304,6 +387,19 @@ export function StepAccount({
             <Mail className="mr-2 h-4 w-4" />
             Crear cuenta con email
           </Button>
+
+          {/* Botón Anterior — solo en modo choose */}
+          <div className="flex justify-center pt-2">
+            <Button variant="ghost" size="sm" onClick={onPrev} disabled={loading}>
+              Anterior
+            </Button>
+          </div>
+
+          {loading && (
+            <p className="text-center text-xs text-muted-foreground">
+              Creando cuenta con Google...
+            </p>
+          )}
         </div>
       )}
 
@@ -320,43 +416,129 @@ export function StepAccount({
               onChange={(e) => { setEmail(e.target.value); setError("") }}
             />
           </div>
+
           <div className="space-y-2">
             <Label htmlFor="admin-password">Password</Label>
             <div className="relative">
               <Input
                 id="admin-password"
                 type={showPwd ? "text" : "password"}
-                placeholder="Mínimo 8 caracteres"
+                placeholder="Minimo 8 caracteres"
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setError("") }}
-                className="pr-10"
+                className="pr-16"
               />
-              <button
-                type="button"
-                onClick={() => setShowPwd((v) => !v)}
-                className={cn(
-                  "absolute right-2 top-1/2 -translate-y-1/2 rounded p-1",
-                  "text-muted-foreground hover:text-foreground"
-                )}
-                tabIndex={-1}
-                aria-label={showPwd ? "Ocultar password" : "Mostrar password"}
-              >
-                {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
+              <div className="absolute inset-y-0 right-1 flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(password)}
+                  disabled={!password}
+                  tabIndex={-1}
+                  title="Copiar password"
+                  className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPwd((v) => !v)}
+                  tabIndex={-1}
+                  title={showPwd ? "Ocultar password" : "Mostrar password"}
+                  className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <span className="relative block h-4 w-4">
+                    <Eye
+                      className={cn(
+                        "absolute inset-0 h-4 w-4 transition-all duration-200",
+                        showPwd ? "scale-100 opacity-100" : "scale-50 opacity-0"
+                      )}
+                    />
+                    <EyeOff
+                      className={cn(
+                        "absolute inset-0 h-4 w-4 transition-all duration-200",
+                        showPwd ? "scale-50 opacity-0" : "scale-100 opacity-100"
+                      )}
+                    />
+                  </span>
+                </button>
+              </div>
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="admin-confirm">Confirmar password</Label>
-            <Input
-              id="admin-confirm"
-              type={showPwd ? "text" : "password"}
-              placeholder="Repite tu password"
-              value={confirm}
-              onChange={(e) => { setConfirm(e.target.value); setError("") }}
-            />
+            {password && (
+              <div className="space-y-1">
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div
+                      key={i}
+                      className="h-1.5 flex-1 rounded-full bg-muted transition-colors"
+                      style={i <= strength.score ? { backgroundColor: strength.color } : undefined}
+                    />
+                  ))}
+                </div>
+                <p className="text-xs" style={{ color: strength.color }}>
+                  {strength.label}
+                </p>
+              </div>
+            )}
           </div>
 
-          <div className="flex gap-2">
+          <div className="space-y-2">
+            <Label htmlFor="admin-confirm">Confirmar password</Label>
+            <div className="relative">
+              <Input
+                id="admin-confirm"
+                type={showConfirmPwd ? "text" : "password"}
+                placeholder="Repite tu password"
+                value={confirm}
+                onChange={(e) => { setConfirm(e.target.value); setError("") }}
+                className="pr-24"
+              />
+              <div className="absolute inset-y-0 right-1 flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={pasteIntoConfirm}
+                  tabIndex={-1}
+                  title="Pegar password"
+                  className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <ClipboardPaste className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(confirm)}
+                  disabled={!confirm}
+                  tabIndex={-1}
+                  title="Copiar password"
+                  className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPwd((v) => !v)}
+                  tabIndex={-1}
+                  title={showConfirmPwd ? "Ocultar password" : "Mostrar password"}
+                  className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <span className="relative block h-4 w-4">
+                    <Eye
+                      className={cn(
+                        "absolute inset-0 h-4 w-4 transition-all duration-200",
+                        showConfirmPwd ? "scale-100 opacity-100" : "scale-50 opacity-0"
+                      )}
+                    />
+                    <EyeOff
+                      className={cn(
+                        "absolute inset-0 h-4 w-4 transition-all duration-200",
+                        showConfirmPwd ? "scale-50 opacity-0" : "scale-100 opacity-100"
+                      )}
+                    />
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-1">
             <Button
               type="button"
               variant="outline"
@@ -377,18 +559,6 @@ export function StepAccount({
             </Button>
           </div>
         </form>
-      )}
-
-      <div className="flex justify-start">
-        <Button variant="ghost" onClick={onPrev} disabled={loading}>
-          Anterior
-        </Button>
-      </div>
-
-      {loading && mode === "choose" && (
-        <p className="text-center text-xs text-muted-foreground">
-          Creando cuenta con Google...
-        </p>
       )}
     </div>
   )
