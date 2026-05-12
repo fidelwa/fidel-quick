@@ -1,44 +1,48 @@
-import { useRef, useState } from "react"
+import { useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAuth } from "@/context/auth-context"
 import { useCustomer } from "@/hooks/use-customer"
-import { useCompleteOnboarding } from "@/hooks/use-onboarding-status"
 import { QRCodeCanvas } from "qrcode.react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { toast } from "sonner"
-import { Download, Copy, Loader2, Star, Wallet } from "lucide-react"
-import type { Program, CashbackProgram, Reward, CashbackReward, Collaborator } from "@/types"
+import { Download, Copy, Star, Wallet, Stamp, CheckCircle2 } from "lucide-react"
+import { clearOnboardingDraft } from "@/hooks/use-onboarding"
+import type {
+  EarnBurnDraft,
+  CashbackDraft,
+  PushcardDraft,
+  RewardDraft,
+  CashbackRewardDraft,
+  CollaboratorDraft,
+} from "@/hooks/use-onboarding"
 
 interface StepReadyProps {
-  earnBurnProgram: Program | null
-  cashbackProgram: CashbackProgram | null
-  rewards: Reward[]
-  cashbackRewards: CashbackReward[]
-  collaborators: Collaborator[]
-  onPrev: () => void
+  earnBurnDraft: EarnBurnDraft | null
+  cashbackDraft: CashbackDraft | null
+  pushcardDraft: PushcardDraft | null
+  rewardDrafts: RewardDraft[]
+  cashbackRewardDrafts: CashbackRewardDraft[]
+  collaboratorDrafts: CollaboratorDraft[]
 }
 
 export function StepReady({
-  earnBurnProgram,
-  cashbackProgram,
-  rewards,
-  cashbackRewards,
-  collaborators,
-  onPrev,
+  earnBurnDraft,
+  cashbackDraft,
+  pushcardDraft,
+  rewardDrafts,
+  cashbackRewardDrafts,
+  collaboratorDrafts,
 }: StepReadyProps) {
   const { customerId } = useAuth()
   const { data: customer } = useCustomer(customerId)
-  const completeOnboarding = useCompleteOnboarding()
   const navigate = useNavigate()
   const qrRef = useRef<HTMLDivElement>(null)
-  const [finishing, setFinishing] = useState(false)
 
   // En prod: origin = https://fidel-quick-...run.app (o el dominio custom).
   // En dev: vite corre en :5173 pero /unirse/* solo lo sirve el backend Go
-  // en :8080, así que apuntamos ahí explícitamente. Al subir a un dominio
-  // custom (ej. fidel.app), basta con que ese dominio resuelva al Cloud Run.
+  // en :8080, así que apuntamos ahí explícitamente.
   const joinOrigin =
     typeof window !== "undefined" && window.location.hostname === "localhost"
       ? "http://localhost:8080"
@@ -66,21 +70,21 @@ export function StepReady({
     }
   }
 
-  const handleFinish = async () => {
-    setFinishing(true)
-    try {
-      await completeOnboarding.mutateAsync()
-      navigate("/")
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al finalizar")
-    } finally {
-      setFinishing(false)
-    }
+  const handleFinish = () => {
+    // Limpiar drafts del localStorage — onboarding completo, ya no se
+    // necesitan. Si el usuario vuelve a /registro, arranca desde cero.
+    clearOnboardingDraft()
+    navigate("/")
   }
+
+  const totalRewards = rewardDrafts.length + cashbackRewardDrafts.length
 
   return (
     <div className="space-y-6">
       <div className="text-center">
+        <div className="mb-2 flex justify-center">
+          <CheckCircle2 className="h-12 w-12 text-green-500" />
+        </div>
         <h2 className="text-xl font-semibold">¡Todo listo!</h2>
         <p className="text-sm text-muted-foreground">
           Tu programa de fidelidad esta configurado
@@ -96,27 +100,33 @@ export function StepReady({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {earnBurnProgram && (
+            {earnBurnDraft && (
               <Badge variant="secondary" className="gap-1">
                 <Star className="h-3 w-3" />
-                {earnBurnProgram.name}
+                {earnBurnDraft.name}
               </Badge>
             )}
-            {cashbackProgram && (
+            {cashbackDraft && (
               <Badge variant="secondary" className="gap-1">
                 <Wallet className="h-3 w-3" />
-                {cashbackProgram.name}
+                {cashbackDraft.name}
+              </Badge>
+            )}
+            {pushcardDraft && (
+              <Badge variant="secondary" className="gap-1">
+                <Stamp className="h-3 w-3" />
+                {pushcardDraft.name}
               </Badge>
             )}
           </div>
 
           <div className="grid grid-cols-2 gap-4 text-center">
             <div className="rounded-lg bg-muted p-3">
-              <p className="text-2xl font-bold">{rewards.length + cashbackRewards.length}</p>
+              <p className="text-2xl font-bold">{totalRewards}</p>
               <p className="text-xs text-muted-foreground">Recompensas</p>
             </div>
             <div className="rounded-lg bg-muted p-3">
-              <p className="text-2xl font-bold">{collaborators.length}</p>
+              <p className="text-2xl font-bold">{collaboratorDrafts.length}</p>
               <p className="text-xs text-muted-foreground">Colaboradores</p>
             </div>
           </div>
@@ -129,7 +139,7 @@ export function StepReady({
           <QRCodeCanvas value={joinUrl} size={256} />
         </div>
 
-        <p className="text-sm text-muted-foreground">
+        <p className="break-all text-center text-sm text-muted-foreground">
           {joinUrl}
         </p>
 
@@ -145,19 +155,9 @@ export function StepReady({
         </div>
       </div>
 
-      <div className="flex justify-between">
-        <Button variant="outline" onClick={onPrev}>
-          Anterior
-        </Button>
-        <Button onClick={handleFinish} disabled={finishing}>
-          {finishing ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Finalizando...
-            </>
-          ) : (
-            "Ir al Dashboard"
-          )}
+      <div className="flex justify-end">
+        <Button onClick={handleFinish}>
+          Ir al Dashboard
         </Button>
       </div>
     </div>

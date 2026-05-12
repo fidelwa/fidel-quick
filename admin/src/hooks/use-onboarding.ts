@@ -1,39 +1,145 @@
-import { useState, useCallback } from "react"
-import type { Program, CashbackProgram, Reward, CashbackReward, Collaborator, PushcardConfig } from "@/types"
+import { useState, useCallback, useEffect } from "react"
+
+// Drafts: la "config pendiente" que el wizard anónimo recolecta antes
+// de que el usuario cree la cuenta. Mantienen solo los campos que el
+// usuario rellena — no IDs ni timestamps, porque esos los asigna el
+// backend cuando el step-account dispara las llamadas POST en batch.
+export interface BusinessInfo {
+  name: string
+  country_code: string
+  phone: string
+  description: string
+}
+
+export interface EarnBurnDraft {
+  name: string
+  points_ratio: number
+}
+
+export interface CashbackDraft {
+  name: string
+  cashback_rate: number
+}
+
+export interface PushcardDraft {
+  name: string
+  card_slots: number
+}
+
+export interface RewardDraft {
+  // local UUID solo para React keys; descartado al crear en backend.
+  local_id: string
+  name: string
+  description: string
+  points_cost: number
+}
+
+export interface CashbackRewardDraft {
+  local_id: string
+  name: string
+  description: string
+  cost: number
+}
+
+export interface CollaboratorDraft {
+  local_id: string
+  name: string
+  phone: string
+}
 
 export interface OnboardingState {
   currentStep: number
   direction: "forward" | "backward"
-  earnBurnProgram: Program | null
-  cashbackProgram: CashbackProgram | null
-  pushcardConfig: PushcardConfig | null
-  rewards: Reward[]
-  cashbackRewards: CashbackReward[]
-  collaborators: Collaborator[]
+  businessInfo: BusinessInfo | null
+  earnBurnDraft: EarnBurnDraft | null
+  cashbackDraft: CashbackDraft | null
+  pushcardDraft: PushcardDraft | null
+  rewardDrafts: RewardDraft[]
+  cashbackRewardDrafts: CashbackRewardDraft[]
+  collaboratorDrafts: CollaboratorDraft[]
 }
+
+const TOTAL_STEPS = 5
 
 const initialState: OnboardingState = {
   currentStep: 1,
   direction: "forward",
-  earnBurnProgram: null,
-  cashbackProgram: null,
-  pushcardConfig: null,
-  rewards: [],
-  cashbackRewards: [],
-  collaborators: [],
+  businessInfo: null,
+  earnBurnDraft: null,
+  cashbackDraft: null,
+  pushcardDraft: null,
+  rewardDrafts: [],
+  cashbackRewardDrafts: [],
+  collaboratorDrafts: [],
+}
+
+const STORAGE_KEY = "fidel_onboarding_draft"
+
+type PersistedDraft = Omit<OnboardingState, "currentStep" | "direction">
+
+function loadDraft(): Partial<OnboardingState> {
+  if (typeof window === "undefined") return {}
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return {}
+    return JSON.parse(raw) as Partial<PersistedDraft>
+  } catch {
+    return {}
+  }
+}
+
+function saveDraft(state: OnboardingState) {
+  if (typeof window === "undefined") return
+  const draft: PersistedDraft = {
+    businessInfo: state.businessInfo,
+    earnBurnDraft: state.earnBurnDraft,
+    cashbackDraft: state.cashbackDraft,
+    pushcardDraft: state.pushcardDraft,
+    rewardDrafts: state.rewardDrafts,
+    cashbackRewardDrafts: state.cashbackRewardDrafts,
+    collaboratorDrafts: state.collaboratorDrafts,
+  }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(draft))
+  } catch {
+    // localStorage puede fallar en modo privado o si está lleno —
+    // silencioso; el wizard sigue funcionando solo perdiendo el resume.
+  }
+}
+
+export function clearOnboardingDraft() {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+export function generateLocalId(): string {
+  // No necesitamos UUID criptográfico; sirve solo como React key.
+  return `local-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
 export function useOnboarding(initialStep?: number) {
-  const [state, setState] = useState<OnboardingState>(() => ({
-    ...initialState,
-    currentStep: initialStep ?? 1,
-  }))
+  const [state, setState] = useState<OnboardingState>(() => {
+    const draft = loadDraft()
+    return {
+      ...initialState,
+      ...draft,
+      currentStep: initialStep ?? 1,
+    }
+  })
+
+  useEffect(() => {
+    saveDraft(state)
+  }, [state])
 
   const nextStep = useCallback(() => {
     setState((s) => ({
       ...s,
       direction: "forward",
-      currentStep: Math.min(s.currentStep + 1, 4),
+      currentStep: Math.min(s.currentStep + 1, TOTAL_STEPS),
     }))
   }, [])
 
@@ -49,44 +155,56 @@ export function useOnboarding(initialStep?: number) {
     setState((s) => ({
       ...s,
       direction: step > s.currentStep ? "forward" : "backward",
-      currentStep: Math.max(1, Math.min(step, 4)),
+      currentStep: Math.max(1, Math.min(step, TOTAL_STEPS)),
     }))
   }, [])
 
-  const setEarnBurnProgram = useCallback((program: Program | null) => {
-    setState((s) => ({ ...s, earnBurnProgram: program }))
+  const setBusinessInfo = useCallback((info: BusinessInfo | null) => {
+    setState((s) => ({ ...s, businessInfo: info }))
   }, [])
 
-  const setCashbackProgram = useCallback((program: CashbackProgram | null) => {
-    setState((s) => ({ ...s, cashbackProgram: program }))
+  const setEarnBurnDraft = useCallback((draft: EarnBurnDraft | null) => {
+    setState((s) => ({ ...s, earnBurnDraft: draft }))
   }, [])
 
-  const setPushcardConfig = useCallback((config: PushcardConfig | null) => {
-    setState((s) => ({ ...s, pushcardConfig: config }))
+  const setCashbackDraft = useCallback((draft: CashbackDraft | null) => {
+    setState((s) => ({ ...s, cashbackDraft: draft }))
   }, [])
 
-  const setRewards = useCallback((rewards: Reward[]) => {
-    setState((s) => ({ ...s, rewards }))
+  const setPushcardDraft = useCallback((draft: PushcardDraft | null) => {
+    setState((s) => ({ ...s, pushcardDraft: draft }))
   }, [])
 
-  const setCashbackRewards = useCallback((cashbackRewards: CashbackReward[]) => {
-    setState((s) => ({ ...s, cashbackRewards }))
+  const setRewardDrafts = useCallback((drafts: RewardDraft[]) => {
+    setState((s) => ({ ...s, rewardDrafts: drafts }))
   }, [])
 
-  const setCollaborators = useCallback((collaborators: Collaborator[]) => {
-    setState((s) => ({ ...s, collaborators }))
+  const setCashbackRewardDrafts = useCallback((drafts: CashbackRewardDraft[]) => {
+    setState((s) => ({ ...s, cashbackRewardDrafts: drafts }))
+  }, [])
+
+  const setCollaboratorDrafts = useCallback((drafts: CollaboratorDraft[]) => {
+    setState((s) => ({ ...s, collaboratorDrafts: drafts }))
+  }, [])
+
+  const reset = useCallback(() => {
+    clearOnboardingDraft()
+    setState({ ...initialState, currentStep: 1 })
   }, [])
 
   return {
     ...state,
+    totalSteps: TOTAL_STEPS,
     nextStep,
     prevStep,
     goToStep,
-    setEarnBurnProgram,
-    setCashbackProgram,
-    setPushcardConfig,
-    setRewards,
-    setCashbackRewards,
-    setCollaborators,
+    setBusinessInfo,
+    setEarnBurnDraft,
+    setCashbackDraft,
+    setPushcardDraft,
+    setRewardDrafts,
+    setCashbackRewardDrafts,
+    setCollaboratorDrafts,
+    reset,
   }
 }

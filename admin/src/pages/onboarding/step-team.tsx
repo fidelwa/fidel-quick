@@ -1,35 +1,29 @@
 import { useState } from "react"
-import { useAuth } from "@/context/auth-context"
-import { useCreateCollaborator } from "@/hooks/use-collaborators"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
-import { Users, Loader2, Plus, Check, MessageCircle } from "lucide-react"
+import { Users, Plus, Check, MessageCircle } from "lucide-react"
 import { COUNTRY_CODES } from "@/lib/country-codes"
-import type { Collaborator } from "@/types"
+import { generateLocalId, type CollaboratorDraft } from "@/hooks/use-onboarding"
 
 interface StepTeamProps {
-  collaborators: Collaborator[]
-  onCollaboratorsChange: (collaborators: Collaborator[]) => void
+  collaboratorDrafts: CollaboratorDraft[]
+  onCollaboratorsChange: (drafts: CollaboratorDraft[]) => void
   onNext: () => void
   onPrev: () => void
 }
 
 export function StepTeam({
-  collaborators,
+  collaboratorDrafts,
   onCollaboratorsChange,
   onNext,
   onPrev,
 }: StepTeamProps) {
-  const { customerId } = useAuth()
-  const createCollaborator = useCreateCollaborator(customerId)
-
   const [name, setName] = useState("")
   const [countryCode, setCountryCode] = useState("+52")
   const [phone, setPhone] = useState("")
-  const [adding, setAdding] = useState(false)
 
-  const handleAdd = async () => {
+  const handleAdd = () => {
     if (!name.trim()) {
       toast.error("Ingresa el nombre del colaborador")
       return
@@ -43,25 +37,18 @@ export function StepTeam({
       return
     }
     const fullPhone = countryCode + phone.trim()
-    setAdding(true)
-    try {
-      const collab = await createCollaborator.mutateAsync({
-        name: name.trim(),
-        phone: fullPhone,
-      })
-      onCollaboratorsChange([...collaborators, { ...collab, name: collab.name || name.trim(), phone: collab.phone || fullPhone }])
-      setName("")
-      setPhone("")
-      toast.success("Colaborador registrado")
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al registrar colaborador")
-    } finally {
-      setAdding(false)
+    const draft: CollaboratorDraft = {
+      local_id: generateLocalId(),
+      name: name.trim(),
+      phone: fullPhone,
     }
+    onCollaboratorsChange([...collaboratorDrafts, draft])
+    setName("")
+    setPhone("")
   }
 
   const handleNext = () => {
-    if (collaborators.length === 0) {
+    if (collaboratorDrafts.length === 0) {
       toast.error("Registra al menos un colaborador")
       return
     }
@@ -94,12 +81,12 @@ export function StepTeam({
           <span />
         </div>
 
-        {/* Scrollable collaborator rows */}
-        {collaborators.length > 0 && (
+        {/* Collaborator rows */}
+        {collaboratorDrafts.length > 0 && (
           <div className="max-h-[200px] overflow-y-auto">
-            {collaborators.map((c) => (
+            {collaboratorDrafts.map((c) => (
               <div
-                key={c.id}
+                key={c.local_id}
                 className="grid grid-cols-[1fr_1fr_36px] items-center gap-2 border-b px-3 py-2 text-sm last:border-b-0"
               >
                 <span className="truncate font-medium">{c.name}</span>
@@ -113,7 +100,7 @@ export function StepTeam({
         )}
 
         {/* Empty state */}
-        {collaborators.length === 0 && (
+        {collaboratorDrafts.length === 0 && (
           <div className="flex items-center justify-center gap-2 px-3 py-8 text-sm text-muted-foreground">
             <Users className="h-4 w-4" />
             <span>Agrega a tu primer colaborador</span>
@@ -153,21 +140,16 @@ export function StepTeam({
               variant="ghost"
               className="h-8 w-8 shrink-0"
               onClick={handleAdd}
-              disabled={adding}
             >
-              {adding ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
+              <Plus className="h-4 w-4" />
             </Button>
           </div>
         </div>
       </div>
 
-      {collaborators.length > 0 && (
+      {collaboratorDrafts.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          {collaborators.length} colaborador{collaborators.length > 1 ? "es" : ""} registrado{collaborators.length > 1 ? "s" : ""}
+          {collaboratorDrafts.length} colaborador{collaboratorDrafts.length > 1 ? "es" : ""} registrado{collaboratorDrafts.length > 1 ? "s" : ""}
         </p>
       )}
 

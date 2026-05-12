@@ -27,7 +27,12 @@ const queryClient = new QueryClient({
   },
 })
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ""
+// OAuth client_id es público por diseño (lo ve el browser igual).
+// admin/.env está gitignored, así que en el build de prod la variable
+// queda vacía. Fallback hardcoded para que el botón Google funcione.
+const GOOGLE_CLIENT_ID =
+  import.meta.env.VITE_GOOGLE_CLIENT_ID ||
+  "814251976341-e77sjt6n7ctvicgaifai98mpanmk9vqm.apps.googleusercontent.com"
 
 function GoogleWrapper({ children }: { children: React.ReactNode }) {
   if (!GOOGLE_CLIENT_ID) return <>{children}</>
