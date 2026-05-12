@@ -15,6 +15,12 @@ import (
 // Repository abstracts database access for business/role resolution, landing, and auto-registration.
 type Repository interface {
 	GetActiveCustomerByID(ctx context.Context, id string) (name string, err error)
+	// FindActiveCustomersByName busca customers activos cuyo nombre coincide
+	// (case-insensitive, exact match con LOWER trim). Se usa para resolver
+	// deeplinks que usan el nombre en lugar de UUID, ej. "Quiero unirme a
+	// Santas Conchas". Devuelve [] si ninguno coincide; el caller maneja
+	// 1=auto-resolve, >1=multi-business prompt.
+	FindActiveCustomersByName(ctx context.Context, name string) ([]session.SelectionOption, error)
 	UserExistsInBusiness(ctx context.Context, phone, customerID string) (bool, error)
 	FindBusinessesByPhone(ctx context.Context, phone string) ([]session.SelectionOption, error)
 	FindCollaborator(ctx context.Context, phone, customerID string) (id string, err error)
@@ -45,6 +51,31 @@ func (r *PostgresRepository) GetActiveCustomerByID(ctx context.Context, id strin
 		return "", fmt.Errorf("query customer by id: %w", err)
 	}
 	return name, nil
+}
+
+// FindActiveCustomersByName: case-insensitive exact match con trim. Sin LIKE
+// para evitar matches accidentales — la idea es que el deeplink ponga el
+// nombre exacto que el wizard registró.
+func (r *PostgresRepository) FindActiveCustomersByName(ctx context.Context, name string) ([]session.SelectionOption, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name FROM customers
+		WHERE LOWER(TRIM(name)) = LOWER(TRIM($1)) AND active = true
+		ORDER BY created_at ASC
+	`, name)
+	if err != nil {
+		return nil, fmt.Errorf("query customers by name: %w", err)
+	}
+	defer rows.Close()
+
+	var out []session.SelectionOption
+	for rows.Next() {
+		var opt session.SelectionOption
+		if err := rows.Scan(&opt.CustomerID, &opt.Name); err != nil {
+			return nil, fmt.Errorf("scan customer: %w", err)
+		}
+		out = append(out, opt)
+	}
+	return out, rows.Err()
 }
 
 func (r *PostgresRepository) UserExistsInBusiness(ctx context.Context, ph, customerID string) (bool, error) {
@@ -171,4 +202,3 @@ func (r *PostgresRepository) GetActiveProgramTypes(ctx context.Context, customer
 	}
 	return modules, nil
 }
-
