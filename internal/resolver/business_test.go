@@ -13,14 +13,15 @@ import (
 // --- Mock Repository ---
 
 type mockRepo struct {
-	getActiveCustomerByIDFn  func(ctx context.Context, id string) (string, error)
-	userExistsInBusinessFn   func(ctx context.Context, phone, customerID string) (bool, error)
-	findBusinessesByPhoneFn  func(ctx context.Context, phone string) ([]session.SelectionOption, error)
-	findCollaboratorFn       func(ctx context.Context, phone, customerID string) (string, error)
-	findClientFn             func(ctx context.Context, phone, customerID string) (string, error)
-	registerClientFn         func(ctx context.Context, customerID, phone string) error
-	getCustomerBySlugFn      func(ctx context.Context, slug string) (string, string, string, string, string, string, error)
-	getActiveProgramTypesFn  func(ctx context.Context, customerID string) ([]string, error)
+	getActiveCustomerByIDFn     func(ctx context.Context, id string) (string, error)
+	findActiveCustomersByNameFn func(ctx context.Context, name string) ([]session.SelectionOption, error)
+	userExistsInBusinessFn      func(ctx context.Context, phone, customerID string) (bool, error)
+	findBusinessesByPhoneFn     func(ctx context.Context, phone string) ([]session.SelectionOption, error)
+	findCollaboratorFn          func(ctx context.Context, phone, customerID string) (string, error)
+	findClientFn                func(ctx context.Context, phone, customerID string) (string, error)
+	registerClientFn            func(ctx context.Context, customerID, phone string) error
+	getCustomerBySlugFn         func(ctx context.Context, slug string) (string, string, string, string, string, string, error)
+	getActiveProgramTypesFn     func(ctx context.Context, customerID string) ([]string, error)
 }
 
 func (m *mockRepo) GetActiveCustomerByID(ctx context.Context, id string) (string, error) {
@@ -28,6 +29,12 @@ func (m *mockRepo) GetActiveCustomerByID(ctx context.Context, id string) (string
 		return m.getActiveCustomerByIDFn(ctx, id)
 	}
 	return "", nil
+}
+func (m *mockRepo) FindActiveCustomersByName(ctx context.Context, name string) ([]session.SelectionOption, error) {
+	if m.findActiveCustomersByNameFn != nil {
+		return m.findActiveCustomersByNameFn(ctx, name)
+	}
+	return nil, nil
 }
 func (m *mockRepo) UserExistsInBusiness(ctx context.Context, phone, customerID string) (bool, error) {
 	if m.userExistsInBusinessFn != nil {
@@ -71,6 +78,7 @@ func (m *mockRepo) GetActiveProgramTypes(ctx context.Context, customerID string)
 	}
 	return nil, nil
 }
+
 // --- Business Resolver Tests ---
 
 func TestResolve_Deeplink_ExistingUser(t *testing.T) {
@@ -181,7 +189,7 @@ func TestResolve_Phone_NotRegistered(t *testing.T) {
 	assert.Nil(t, multi)
 }
 
-func TestExtractDeeplink(t *testing.T) {
+func TestExtractDeeplinkUUID(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
@@ -196,10 +204,95 @@ func TestExtractDeeplink(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		id, ok := extractDeeplink(tt.input)
+		id, ok := extractDeeplinkUUID(tt.input)
 		assert.Equal(t, tt.found, ok, "input: %q", tt.input)
 		if tt.found {
 			assert.Equal(t, tt.expected, id, "input: %q", tt.input)
 		}
 	}
+}
+
+func TestExtractDeeplinkName(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+		found    bool
+	}{
+		{"Hola! Quiero unirme a Santas Conchas", "Santas Conchas", true},
+		{"hola, quiero unirme a Café del Sol.", "Café del Sol", true},
+		{"Quiero unirme a Foo unirme:abc", "Foo", true},
+		{"unirme a Bar", "Bar", true},
+		{"Hola mundo", "", false},
+		{"unirme: solo el token viejo", "", false},
+		{"unirme a    ", "", false},
+		{"", "", false},
+	}
+	for _, tt := range tests {
+		name, ok := extractDeeplinkName(tt.input)
+		assert.Equal(t, tt.found, ok, "input: %q", tt.input)
+		if tt.found {
+			assert.Equal(t, tt.expected, name, "input: %q", tt.input)
+		}
+	}
+}
+
+func TestResolve_DeeplinkName_SingleMatch(t *testing.T) {
+	repo := &mockRepo{
+		findActiveCustomersByNameFn: func(_ context.Context, name string) ([]session.SelectionOption, error) {
+			assert.Equal(t, "Santas Conchas", name)
+			return []session.SelectionOption{
+				{CustomerID: "cust-1", Name: "Santas Conchas"},
+			}, nil
+		},
+		userExistsInBusinessFn: func(_ context.Context, _, _ string) (bool, error) {
+			return false, nil
+		},
+	}
+	resolver := NewBusinessResolver(repo)
+
+	result, multi, err := resolver.Resolve(context.Background(), "+123", "Hola! Quiero unirme a Santas Conchas")
+	require.NoError(t, err)
+	assert.Nil(t, multi)
+	require.NotNil(t, result)
+	assert.Equal(t, "cust-1", result.CustomerID)
+	assert.Equal(t, "Santas Conchas", result.BusinessName)
+	assert.True(t, result.IsNew)
+}
+
+func TestResolve_DeeplinkName_MultipleMatches(t *testing.T) {
+	repo := &mockRepo{
+		findActiveCustomersByNameFn: func(_ context.Context, _ string) ([]session.SelectionOption, error) {
+			return []session.SelectionOption{
+				{CustomerID: "cust-1", Name: "Santas Conchas"},
+				{CustomerID: "cust-2", Name: "Santas Conchas"},
+			}, nil
+		},
+	}
+	resolver := NewBusinessResolver(repo)
+
+	result, multi, err := resolver.Resolve(context.Background(), "+123", "Quiero unirme a Santas Conchas")
+	require.NoError(t, err)
+	assert.Nil(t, result)
+	require.NotNil(t, multi)
+	assert.Len(t, multi.Options, 2)
+}
+
+func TestResolve_DeeplinkName_NoMatch_FallsBackToPhone(t *testing.T) {
+	repo := &mockRepo{
+		findActiveCustomersByNameFn: func(_ context.Context, _ string) ([]session.SelectionOption, error) {
+			return nil, nil
+		},
+		findBusinessesByPhoneFn: func(_ context.Context, _ string) ([]session.SelectionOption, error) {
+			return []session.SelectionOption{
+				{CustomerID: "cust-1", Name: "Business A"},
+			}, nil
+		},
+	}
+	resolver := NewBusinessResolver(repo)
+
+	result, multi, err := resolver.Resolve(context.Background(), "+123", "Quiero unirme a Nombre Inexistente")
+	require.NoError(t, err)
+	assert.Nil(t, multi)
+	require.NotNil(t, result)
+	assert.Equal(t, "cust-1", result.CustomerID)
 }
