@@ -19,6 +19,8 @@ import {
   Users,
   Copy,
   ClipboardPaste,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react"
 import { useAuth } from "@/context/auth-context"
 import {
@@ -185,7 +187,19 @@ export function StepAccount({
 
   const fullPhone = businessInfo.country_code + businessInfo.phone
   const strength = getPasswordStrength(password)
+  const confirmStrength = getPasswordStrength(confirm)
   const totalRewards = rewardDrafts.length + cashbackRewardDrafts.length
+
+  // Match state entre password y confirm:
+  //   idle: confirm vacío — no opinamos
+  //   match: ambas iguales y no vacías
+  //   mismatch: confirm tiene contenido pero no iguala a password
+  const matchState: "idle" | "match" | "mismatch" =
+    !confirm
+      ? "idle"
+      : password === confirm
+        ? "match"
+        : "mismatch"
 
   const copyToClipboard = async (value: string) => {
     if (!value) return
@@ -490,7 +504,14 @@ export function StepAccount({
                 placeholder="Repite tu password"
                 value={confirm}
                 onChange={(e) => { setConfirm(e.target.value); setError("") }}
-                className="pr-24"
+                className={cn(
+                  "pr-24 transition-colors duration-200",
+                  matchState === "match" &&
+                    "border-green-500 focus-visible:border-green-500 focus-visible:ring-green-500/30",
+                  matchState === "mismatch" &&
+                    "border-amber-500 focus-visible:border-amber-500 focus-visible:ring-amber-500/30"
+                )}
+                aria-invalid={matchState === "mismatch"}
               />
               <div className="absolute inset-y-0 right-1 flex items-center gap-0.5">
                 <button
@@ -536,6 +557,38 @@ export function StepAccount({
                 </button>
               </div>
             </div>
+
+            {/* Match indicator */}
+            {matchState === "match" && (
+              <p className="flex items-center gap-1.5 text-xs text-green-600">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Las passwords coinciden
+              </p>
+            )}
+            {matchState === "mismatch" && (
+              <p className="flex items-center gap-1.5 text-xs text-amber-600">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Las passwords no coinciden todavia
+              </p>
+            )}
+
+            {/* Strength bar de la confirm (mismo computo que el primer campo) */}
+            {confirm && (
+              <div className="space-y-1">
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div
+                      key={i}
+                      className="h-1.5 flex-1 rounded-full bg-muted transition-colors"
+                      style={i <= confirmStrength.score ? { backgroundColor: confirmStrength.color } : undefined}
+                    />
+                  ))}
+                </div>
+                <p className="text-xs" style={{ color: confirmStrength.color }}>
+                  {confirmStrength.label}
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-2 pt-1">
