@@ -1,7 +1,7 @@
 import { Check } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const steps = ["Programa", "Recompensas", "Equipo", "Listo"]
+const steps = ["Programa", "Recompensas", "Equipo", "Cuenta", "Listo"]
 
 interface StepIndicatorProps {
   currentStep: number

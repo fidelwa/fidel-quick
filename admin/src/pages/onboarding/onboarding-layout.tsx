@@ -1,170 +1,89 @@
-import { useEffect, useRef } from "react"
 import { Navigate } from "react-router-dom"
 import { useAuth } from "@/context/auth-context"
-import { usePrograms } from "@/hooks/use-programs"
-import { useCashbackPrograms } from "@/hooks/use-cashback-programs"
-import { useCollaborators } from "@/hooks/use-collaborators"
-import { useRewards } from "@/hooks/use-rewards"
-import { useCashbackRewards } from "@/hooks/use-cashback-rewards"
-import { usePushcardConfig } from "@/hooks/use-pushcard"
 import { useOnboarding } from "@/hooks/use-onboarding"
-import { useOnboardingStatus, useUpdateOnboardingStep } from "@/hooks/use-onboarding-status"
 import { StepIndicator } from "@/components/onboarding/step-indicator"
 import { StepTransition } from "@/components/onboarding/step-transition"
 import { StepProgram } from "./step-program"
 import { StepRewards } from "./step-rewards"
 import { StepTeam } from "./step-team"
+import { StepAccount } from "./step-account"
 import { StepReady } from "./step-ready"
-import { Skeleton } from "@/components/ui/skeleton"
 
+// Flujo nuevo (anonymous wizard):
+//   /registro            → recolecta business info, navega a /onboarding
+//   /onboarding          → wizard sin auth (state en localStorage)
+//     Step 1: programas
+//     Step 2: recompensas
+//     Step 3: equipo
+//     Step 4: cuenta     → aquí se hace POST /onboarding/register o /register/google
+//     Step 5: listo      → muestra QR, navega a /
+//
+// Si el usuario llega ya autenticado, lo mandamos al dashboard — el
+// onboarding solo corre para usuarios nuevos. La sesión vieja queda
+// inválida tras el deploy de este refactor (los wizard-states viejos
+// del server no se respetan).
 export function OnboardingLayout() {
-  const { isAuthenticated, customerId } = useAuth()
-  const { data: onboardingStatus, isLoading: onboardingLoading } = useOnboardingStatus(isAuthenticated)
-  const updateStep = useUpdateOnboardingStep()
-  const { data: programs } = usePrograms(customerId)
-  const { data: cashbackPrograms } = useCashbackPrograms(customerId)
-  const { data: existingCollaborators } = useCollaborators(customerId)
-  // /pushcard/config devuelve 404 (apperror.NotFound) cuando aún no hay
-  // pushcard creada — useQuery lo expone como error y data = undefined.
-  // Lo tratamos como "no hay" sin spamear toasts.
-  const { data: pushcardFromServer, isLoading: pushcardLoading } = usePushcardConfig(customerId)
-
-  const earnBurnProgramFromServer = programs?.[0] ?? null
-  const cashbackProgramFromServer = cashbackPrograms?.[0] ?? null
-
-  const { data: existingRewards } = useRewards(earnBurnProgramFromServer?.id ?? "")
-  const { data: existingCbRewards } = useCashbackRewards(cashbackProgramFromServer?.id ?? "")
-
+  const { isAuthenticated } = useAuth()
   const onboarding = useOnboarding()
-  const recoveryDone = useRef(false)
 
-  // Reload recovery: sync server data into local state and jump to correct step
-  useEffect(() => {
-    if (recoveryDone.current) return
-    // Wait until base queries have resolved
-    if (programs === undefined || cashbackPrograms === undefined) return
-    // pushcard responde 404 si no hay config — esperamos isLoading=false
-    // (no data === undefined, porque data nunca llega cuando hay 404).
-    if (pushcardLoading) return
-
-    // If there are programs, wait for their rewards to resolve too (sequential fetch)
-    if (earnBurnProgramFromServer && existingRewards === undefined) return
-    if (cashbackProgramFromServer && existingCbRewards === undefined) return
-
-    if (earnBurnProgramFromServer) {
-      onboarding.setEarnBurnProgram(earnBurnProgramFromServer)
+  if (isAuthenticated && onboarding.currentStep < 5) {
+    // Usuario ya logueado pero no terminó step-ready: probablemente
+    // viene de step-account que ya creó la cuenta. Lo dejamos avanzar
+    // al step 5 (ready). Si está en steps 1-3 logueado, es un usuario
+    // viejo — lo mandamos al dashboard.
+    if (onboarding.currentStep <= 3) {
+      return <Navigate to="/" replace />
     }
-    if (cashbackProgramFromServer) {
-      onboarding.setCashbackProgram(cashbackProgramFromServer)
-    }
-    if (pushcardFromServer) {
-      onboarding.setPushcardConfig(pushcardFromServer)
-    }
-    if (existingRewards?.length) {
-      onboarding.setRewards(existingRewards)
-    }
-    if (existingCbRewards?.length) {
-      onboarding.setCashbackRewards(existingCbRewards)
-    }
-    if (existingCollaborators?.length) {
-      onboarding.setCollaborators(existingCollaborators)
-    }
-
-    // Use server step if available, otherwise calculate from data
-    if (onboardingStatus?.current_step && onboardingStatus.current_step > 1) {
-      onboarding.goToStep(onboardingStatus.current_step)
-    } else {
-      const hasPrograms =
-        (programs?.length ?? 0) > 0 ||
-        (cashbackPrograms?.length ?? 0) > 0 ||
-        !!pushcardFromServer
-      if (hasPrograms) {
-        const hasRewards = (existingRewards?.length ?? 0) > 0 || (existingCbRewards?.length ?? 0) > 0
-        if (hasRewards) {
-          const hasCollaborators = (existingCollaborators?.length ?? 0) > 0
-          if (hasCollaborators) {
-            onboarding.goToStep(4)
-          } else {
-            onboarding.goToStep(3)
-          }
-        } else {
-          onboarding.goToStep(2)
-        }
-      }
-    }
-
-    recoveryDone.current = true
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    programs,
-    cashbackPrograms,
-    earnBurnProgramFromServer?.id,
-    cashbackProgramFromServer?.id,
-    existingRewards,
-    existingCbRewards,
-    existingCollaborators,
-    onboardingStatus,
-    pushcardFromServer,
-    pushcardLoading,
-  ])
-
-  // Persist step changes to server
-  const prevStepRef = useRef(onboarding.currentStep)
-  useEffect(() => {
-    if (onboarding.currentStep !== prevStepRef.current && recoveryDone.current) {
-      prevStepRef.current = onboarding.currentStep
-      updateStep.mutate(onboarding.currentStep)
-    }
-  }, [onboarding.currentStep, updateStep])
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
   }
 
-  if (onboardingLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="w-full max-w-2xl space-y-6 p-4">
-          <Skeleton className="mx-auto h-10 w-64" />
-          <Skeleton className="h-64 w-full" />
-        </div>
-      </div>
-    )
-  }
-
-  if (onboardingStatus?.completed) {
-    return <Navigate to="/" replace />
+  // Sin auth y sin businessInfo: el usuario llegó a /onboarding sin
+  // pasar por /registro. Lo mandamos a /registro.
+  if (!isAuthenticated && !onboarding.businessInfo) {
+    return <Navigate to="/registro" replace />
   }
 
   const completedSteps: number[] = []
-  if (onboarding.earnBurnProgram || onboarding.cashbackProgram || onboarding.pushcardConfig) completedSteps.push(1)
-  if (onboarding.rewards.length > 0 || onboarding.cashbackRewards.length > 0) completedSteps.push(2)
-  if (onboarding.collaborators.length > 0) completedSteps.push(3)
+  if (onboarding.earnBurnDraft || onboarding.cashbackDraft || onboarding.pushcardDraft) {
+    completedSteps.push(1)
+  }
+  const onlyPushcard =
+    !onboarding.earnBurnDraft &&
+    !onboarding.cashbackDraft &&
+    !!onboarding.pushcardDraft
+  if (onboarding.rewardDrafts.length > 0 || onboarding.cashbackRewardDrafts.length > 0 || onlyPushcard) {
+    completedSteps.push(2)
+  }
+  if (onboarding.collaboratorDrafts.length > 0) {
+    completedSteps.push(3)
+  }
+  if (isAuthenticated) {
+    completedSteps.push(4)
+  }
 
   const renderStep = () => {
     switch (onboarding.currentStep) {
       case 1:
         return (
           <StepProgram
-            earnBurnProgram={onboarding.earnBurnProgram}
-            cashbackProgram={onboarding.cashbackProgram}
-            pushcardConfig={onboarding.pushcardConfig}
-            onEarnBurnCreated={onboarding.setEarnBurnProgram}
-            onCashbackCreated={onboarding.setCashbackProgram}
-            onPushcardCreated={onboarding.setPushcardConfig}
+            earnBurnDraft={onboarding.earnBurnDraft}
+            cashbackDraft={onboarding.cashbackDraft}
+            pushcardDraft={onboarding.pushcardDraft}
+            onEarnBurnChange={onboarding.setEarnBurnDraft}
+            onCashbackChange={onboarding.setCashbackDraft}
+            onPushcardChange={onboarding.setPushcardDraft}
             onNext={onboarding.nextStep}
           />
         )
       case 2:
         return (
           <StepRewards
-            earnBurnProgram={onboarding.earnBurnProgram}
-            cashbackProgram={onboarding.cashbackProgram}
-            pushcardConfig={onboarding.pushcardConfig}
-            rewards={onboarding.rewards}
-            cashbackRewards={onboarding.cashbackRewards}
-            onRewardsChange={onboarding.setRewards}
-            onCashbackRewardsChange={onboarding.setCashbackRewards}
+            earnBurnDraft={onboarding.earnBurnDraft}
+            cashbackDraft={onboarding.cashbackDraft}
+            pushcardDraft={onboarding.pushcardDraft}
+            rewardDrafts={onboarding.rewardDrafts}
+            cashbackRewardDrafts={onboarding.cashbackRewardDrafts}
+            onRewardsChange={onboarding.setRewardDrafts}
+            onCashbackRewardsChange={onboarding.setCashbackRewardDrafts}
             onNext={onboarding.nextStep}
             onPrev={onboarding.prevStep}
           />
@@ -172,21 +91,38 @@ export function OnboardingLayout() {
       case 3:
         return (
           <StepTeam
-            collaborators={onboarding.collaborators}
-            onCollaboratorsChange={onboarding.setCollaborators}
+            collaboratorDrafts={onboarding.collaboratorDrafts}
+            onCollaboratorsChange={onboarding.setCollaboratorDrafts}
             onNext={onboarding.nextStep}
             onPrev={onboarding.prevStep}
           />
         )
       case 4:
+        if (!onboarding.businessInfo) {
+          return <Navigate to="/registro" replace />
+        }
+        return (
+          <StepAccount
+            businessInfo={onboarding.businessInfo}
+            earnBurnDraft={onboarding.earnBurnDraft}
+            cashbackDraft={onboarding.cashbackDraft}
+            pushcardDraft={onboarding.pushcardDraft}
+            rewardDrafts={onboarding.rewardDrafts}
+            cashbackRewardDrafts={onboarding.cashbackRewardDrafts}
+            collaboratorDrafts={onboarding.collaboratorDrafts}
+            onSuccess={onboarding.nextStep}
+            onPrev={onboarding.prevStep}
+          />
+        )
+      case 5:
         return (
           <StepReady
-            earnBurnProgram={onboarding.earnBurnProgram}
-            cashbackProgram={onboarding.cashbackProgram}
-            rewards={onboarding.rewards}
-            cashbackRewards={onboarding.cashbackRewards}
-            collaborators={onboarding.collaborators}
-            onPrev={onboarding.prevStep}
+            earnBurnDraft={onboarding.earnBurnDraft}
+            cashbackDraft={onboarding.cashbackDraft}
+            pushcardDraft={onboarding.pushcardDraft}
+            rewardDrafts={onboarding.rewardDrafts}
+            cashbackRewardDrafts={onboarding.cashbackRewardDrafts}
+            collaboratorDrafts={onboarding.collaboratorDrafts}
           />
         )
       default:

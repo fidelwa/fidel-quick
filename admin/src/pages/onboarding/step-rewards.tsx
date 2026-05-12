@@ -1,22 +1,26 @@
 import { useState, useRef } from "react"
-import { useCreateReward } from "@/hooks/use-rewards"
-import { useCreateCashbackReward } from "@/hooks/use-cashback-rewards"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { Gift, Loader2, Plus, Upload, Check } from "lucide-react"
 import * as XLSX from "xlsx"
-import type { Program, CashbackProgram, PushcardConfig, Reward, CashbackReward } from "@/types"
+import {
+  generateLocalId,
+  type EarnBurnDraft,
+  type CashbackDraft,
+  type PushcardDraft,
+  type RewardDraft,
+  type CashbackRewardDraft,
+} from "@/hooks/use-onboarding"
 
 interface StepRewardsProps {
-  earnBurnProgram: Program | null
-  cashbackProgram: CashbackProgram | null
-  // Opcional para no romper tests existentes; en runtime siempre llega.
-  pushcardConfig?: PushcardConfig | null
-  rewards: Reward[]
-  cashbackRewards: CashbackReward[]
-  onRewardsChange: (rewards: Reward[]) => void
-  onCashbackRewardsChange: (rewards: CashbackReward[]) => void
+  earnBurnDraft: EarnBurnDraft | null
+  cashbackDraft: CashbackDraft | null
+  pushcardDraft: PushcardDraft | null
+  rewardDrafts: RewardDraft[]
+  cashbackRewardDrafts: CashbackRewardDraft[]
+  onRewardsChange: (drafts: RewardDraft[]) => void
+  onCashbackRewardsChange: (drafts: CashbackRewardDraft[]) => void
   onNext: () => void
   onPrev: () => void
 }
@@ -33,84 +37,65 @@ interface ExcelRewardRow {
 }
 
 export function StepRewards({
-  earnBurnProgram,
-  cashbackProgram,
-  pushcardConfig = null,
-  rewards,
-  cashbackRewards,
+  earnBurnDraft,
+  cashbackDraft,
+  pushcardDraft,
+  rewardDrafts,
+  cashbackRewardDrafts,
   onRewardsChange,
   onCashbackRewardsChange,
   onNext,
   onPrev,
 }: StepRewardsProps) {
-  const createReward = useCreateReward(earnBurnProgram?.id ?? "")
-  const createCashbackReward = useCreateCashbackReward(cashbackProgram?.id ?? "")
-
   const [rewardName, setRewardName] = useState("")
   const [rewardDesc, setRewardDesc] = useState("")
   const [rewardCost, setRewardCost] = useState("")
-  const [addingReward, setAddingReward] = useState(false)
 
   const [cbRewardName, setCbRewardName] = useState("")
   const [cbRewardDesc, setCbRewardDesc] = useState("")
   const [cbRewardCost, setCbRewardCost] = useState("")
-  const [addingCbReward, setAddingCbReward] = useState(false)
 
   const [importing, setImporting] = useState(false)
 
   const earnFileRef = useRef<HTMLInputElement>(null)
   const cbFileRef = useRef<HTMLInputElement>(null)
 
-  const totalRewards = rewards.length + cashbackRewards.length
+  const totalRewards = rewardDrafts.length + cashbackRewardDrafts.length
 
-  const handleAddReward = async () => {
+  const handleAddReward = () => {
     if (!rewardName.trim()) {
       toast.error("Ingresa el nombre de la recompensa")
       return
     }
     const cost = Number(rewardCost) || 100
-    setAddingReward(true)
-    try {
-      const reward = await createReward.mutateAsync({
-        name: rewardName.trim(),
-        description: rewardDesc.trim(),
-        points_cost: cost,
-      })
-      onRewardsChange([...rewards, reward])
-      setRewardName("")
-      setRewardDesc("")
-      setRewardCost("")
-      toast.success("Recompensa creada")
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al crear recompensa")
-    } finally {
-      setAddingReward(false)
+    const draft: RewardDraft = {
+      local_id: generateLocalId(),
+      name: rewardName.trim(),
+      description: rewardDesc.trim(),
+      points_cost: cost,
     }
+    onRewardsChange([...rewardDrafts, draft])
+    setRewardName("")
+    setRewardDesc("")
+    setRewardCost("")
   }
 
-  const handleAddCbReward = async () => {
+  const handleAddCbReward = () => {
     if (!cbRewardName.trim()) {
       toast.error("Ingresa el nombre del beneficio")
       return
     }
     const cost = Number(cbRewardCost) || 50
-    setAddingCbReward(true)
-    try {
-      const reward = await createCashbackReward.mutateAsync({
-        name: cbRewardName.trim(),
-        description: cbRewardDesc.trim(),
-        cost,
-      })
-      onCashbackRewardsChange([...cashbackRewards, reward])
-      setCbRewardName("")
-      setCbRewardDesc("")
-      setCbRewardCost("")
-      toast.success("Beneficio creado")
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al crear beneficio")
-    } finally {
-      setAddingCbReward(false)
+    const draft: CashbackRewardDraft = {
+      local_id: generateLocalId(),
+      name: cbRewardName.trim(),
+      description: cbRewardDesc.trim(),
+      cost,
     }
+    onCashbackRewardsChange([...cashbackRewardDrafts, draft])
+    setCbRewardName("")
+    setCbRewardDesc("")
+    setCbRewardCost("")
   }
 
   const parseExcelFile = (file: File): Promise<ExcelRewardRow[]> => {
@@ -145,7 +130,7 @@ export function StepRewards({
         return
       }
 
-      const created: Reward[] = []
+      const created: RewardDraft[] = []
       for (const row of rows) {
         const name = (row.nombre ?? row.Nombre ?? "").toString().trim()
         const description = (row.descripcion ?? row.Descripcion ?? "").toString().trim()
@@ -153,16 +138,16 @@ export function StepRewards({
 
         if (!name || pointsCost <= 0) continue
 
-        const reward = await createReward.mutateAsync({
+        created.push({
+          local_id: generateLocalId(),
           name,
           description,
           points_cost: pointsCost,
         })
-        created.push(reward)
       }
 
       if (created.length > 0) {
-        onRewardsChange([...rewards, ...created])
+        onRewardsChange([...rewardDrafts, ...created])
         toast.success(`${created.length} recompensa${created.length > 1 ? "s" : ""} importada${created.length > 1 ? "s" : ""}`)
       } else {
         toast.error("No se encontraron filas validas. Columnas esperadas: Nombre, Descripcion, Puntos")
@@ -187,7 +172,7 @@ export function StepRewards({
         return
       }
 
-      const created: CashbackReward[] = []
+      const created: CashbackRewardDraft[] = []
       for (const row of rows) {
         const name = (row.nombre ?? row.Nombre ?? "").toString().trim()
         const description = (row.descripcion ?? row.Descripcion ?? "").toString().trim()
@@ -195,16 +180,16 @@ export function StepRewards({
 
         if (!name || cost <= 0) continue
 
-        const reward = await createCashbackReward.mutateAsync({
+        created.push({
+          local_id: generateLocalId(),
           name,
           description,
           cost,
         })
-        created.push(reward)
       }
 
       if (created.length > 0) {
-        onCashbackRewardsChange([...cashbackRewards, ...created])
+        onCashbackRewardsChange([...cashbackRewardDrafts, ...created])
         toast.success(`${created.length} beneficio${created.length > 1 ? "s" : ""} importado${created.length > 1 ? "s" : ""}`)
       } else {
         toast.error("No se encontraron filas validas. Columnas esperadas: Nombre, Descripcion, Costo")
@@ -220,7 +205,7 @@ export function StepRewards({
     // Si solo hay pushcard (sin earnburn ni cashback), no hace falta crear
     // recompensas en este step — la recompensa de pushcard se configura
     // luego en /admin/pushcard.
-    const onlyPushcard = !earnBurnProgram && !cashbackProgram && !!pushcardConfig
+    const onlyPushcard = !earnBurnDraft && !cashbackDraft && !!pushcardDraft
     if (!onlyPushcard && totalRewards === 0) {
       toast.error("Crea al menos una recompensa")
       return
@@ -238,7 +223,7 @@ export function StepRewards({
       </div>
 
       {/* Pushcard solo: no hay rewards en este step */}
-      {!earnBurnProgram && !cashbackProgram && pushcardConfig && (
+      {!earnBurnDraft && !cashbackDraft && pushcardDraft && (
         <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
           Tu programa de tarjeta de sellos no necesita recompensas en este paso.
           Configura la recompensa al completar la tarjeta luego desde
@@ -247,14 +232,14 @@ export function StepRewards({
       )}
 
       {/* Earn-Burn Rewards */}
-      {earnBurnProgram && (
+      {earnBurnDraft && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium">
-              Recompensas de Puntos — {earnBurnProgram.name}
-              {rewards.length > 0 && (
+              Recompensas de Puntos — {earnBurnDraft.name}
+              {rewardDrafts.length > 0 && (
                 <span className="ml-2 text-xs text-muted-foreground">
-                  ({rewards.length})
+                  ({rewardDrafts.length})
                 </span>
               )}
             </h3>
@@ -283,7 +268,6 @@ export function StepRewards({
           </div>
 
           <div className="rounded-lg border">
-            {/* Table header */}
             <div className="grid grid-cols-[1fr_1fr_80px_36px] gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
               <span>Nombre</span>
               <span>Descripcion</span>
@@ -291,12 +275,11 @@ export function StepRewards({
               <span />
             </div>
 
-            {/* Scrollable reward rows */}
-            {rewards.length > 0 && (
+            {rewardDrafts.length > 0 && (
               <div className="max-h-[180px] overflow-y-auto">
-                {rewards.map((r) => (
+                {rewardDrafts.map((r) => (
                   <div
-                    key={r.id}
+                    key={r.local_id}
                     className="grid grid-cols-[1fr_1fr_80px_36px] items-center gap-2 border-b px-3 py-2 text-sm last:border-b-0"
                   >
                     <span className="truncate font-medium">{r.name}</span>
@@ -310,15 +293,13 @@ export function StepRewards({
               </div>
             )}
 
-            {/* Empty state (inside table) */}
-            {rewards.length === 0 && (
+            {rewardDrafts.length === 0 && (
               <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground">
                 <Gift className="h-4 w-4" />
                 <span>Agrega tu primera recompensa</span>
               </div>
             )}
 
-            {/* Inline input row */}
             <div className="grid grid-cols-[1fr_1fr_80px_36px] items-center gap-2 border-t bg-muted/30 px-3 py-2">
               <Input
                 placeholder="Cafe gratis"
@@ -348,13 +329,8 @@ export function StepRewards({
                 variant="ghost"
                 className="h-8 w-8"
                 onClick={handleAddReward}
-                disabled={addingReward}
               >
-                {addingReward ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4" />
-                )}
+                <Plus className="h-4 w-4" />
               </Button>
             </div>
           </div>
@@ -362,14 +338,14 @@ export function StepRewards({
       )}
 
       {/* Cashback Rewards */}
-      {cashbackProgram && (
+      {cashbackDraft && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium">
-              Beneficios de Cashback — {cashbackProgram.name}
-              {cashbackRewards.length > 0 && (
+              Beneficios de Cashback — {cashbackDraft.name}
+              {cashbackRewardDrafts.length > 0 && (
                 <span className="ml-2 text-xs text-muted-foreground">
-                  ({cashbackRewards.length})
+                  ({cashbackRewardDrafts.length})
                 </span>
               )}
             </h3>
@@ -398,7 +374,6 @@ export function StepRewards({
           </div>
 
           <div className="rounded-lg border">
-            {/* Table header */}
             <div className="grid grid-cols-[1fr_1fr_80px_36px] gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
               <span>Nombre</span>
               <span>Descripcion</span>
@@ -406,12 +381,11 @@ export function StepRewards({
               <span />
             </div>
 
-            {/* Scrollable reward rows */}
-            {cashbackRewards.length > 0 && (
+            {cashbackRewardDrafts.length > 0 && (
               <div className="max-h-[180px] overflow-y-auto">
-                {cashbackRewards.map((r) => (
+                {cashbackRewardDrafts.map((r) => (
                   <div
-                    key={r.id}
+                    key={r.local_id}
                     className="grid grid-cols-[1fr_1fr_80px_36px] items-center gap-2 border-b px-3 py-2 text-sm last:border-b-0"
                   >
                     <span className="truncate font-medium">{r.name}</span>
@@ -425,15 +399,13 @@ export function StepRewards({
               </div>
             )}
 
-            {/* Empty state */}
-            {cashbackRewards.length === 0 && (
+            {cashbackRewardDrafts.length === 0 && (
               <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground">
                 <Gift className="h-4 w-4" />
                 <span>Agrega tu primer beneficio</span>
               </div>
             )}
 
-            {/* Inline input row */}
             <div className="grid grid-cols-[1fr_1fr_80px_36px] items-center gap-2 border-t bg-muted/30 px-3 py-2">
               <Input
                 placeholder="Descuento especial"
@@ -463,13 +435,8 @@ export function StepRewards({
                 variant="ghost"
                 className="h-8 w-8"
                 onClick={handleAddCbReward}
-                disabled={addingCbReward}
               >
-                {addingCbReward ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4" />
-                )}
+                <Plus className="h-4 w-4" />
               </Button>
             </div>
           </div>
