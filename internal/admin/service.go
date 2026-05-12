@@ -168,6 +168,13 @@ func (s *Service) UnlinkGoogle(adminID string) (*Admin, error) {
 	return s.repo.GetByID(adminID)
 }
 
+// CheckPhoneExists indica si ya hay algún customer activo con ese phone.
+// No expone qué negocio es — solo true/false — para que el frontend pueda
+// pedir confirmación antes de registrar otro negocio con el mismo número.
+func (s *Service) CheckPhoneExists(phone string) (bool, error) {
+	return s.repo.CustomerPhoneExists(phone)
+}
+
 func (s *Service) Onboard(req OnboardingRequest) (*AuthResponse, error) {
 	slug, err := s.generateUniqueSlug(req.Name)
 	if err != nil {

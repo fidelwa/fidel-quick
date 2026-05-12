@@ -33,6 +33,25 @@ func (h *APIHandler) RegisterAuthenticatedRoutes(rg *gin.RouterGroup) {
 func (h *APIHandler) RegisterOnboardingRoutes(rg *gin.RouterGroup) {
 	rg.POST("/register", h.Onboard)
 	rg.POST("/register/google", h.GoogleOnboard)
+	rg.GET("/phone-check", h.CheckPhone)
+}
+
+// CheckPhone permite al wizard validar (público, sin auth) si un teléfono
+// ya está registrado por algún customer activo. No expone qué negocio es.
+//
+//	GET /api/v1/onboarding/phone-check?phone=+525512345678 → {"exists": bool}
+func (h *APIHandler) CheckPhone(c *gin.Context) {
+	phone := c.Query("phone")
+	if phone == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "phone requerido"})
+		return
+	}
+	exists, err := h.service.CheckPhoneExists(phone)
+	if err != nil {
+		c.Error(apperror.Internal("phone-check failed", err)) //nolint:errcheck
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"exists": exists})
 }
 
 func (h *APIHandler) Login(c *gin.Context) {

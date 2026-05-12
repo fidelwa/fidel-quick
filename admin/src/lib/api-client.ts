@@ -202,6 +202,11 @@ export const onboardingGoogle = (data: GoogleOnboardingRequest) =>
     body: JSON.stringify(data),
   })
 
+// Verifica si el teléfono ya está en uso por algún customer activo.
+// Endpoint público (sin auth), no expone qué negocio es.
+export const checkPhoneExists = (phone: string) =>
+  request<{ exists: boolean }>(`/onboarding/phone-check?phone=${encodeURIComponent(phone)}`)
+
 // Google Auth
 export const loginGoogle = (googleToken: string) =>
   request<AuthResponse>(`/auth/login/google`, {
