@@ -18,15 +18,40 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
+const EMPTY_AUTH: AuthState = { token: "", customerId: "", email: "" }
+
+// Lectura defensiva del localStorage. Antes hacíamos JSON.parse sin
+// try/catch — cualquier corrupción del valor (cadena "undefined", JSON
+// trunco, shape cambiado entre deploys) tiraba en el useState initializer
+// y se renderizaba pantalla en blanco. Ahora cualquier fallo se trata
+// como sesión inexistente y limpia el storage.
+function readStoredAuth(): AuthState {
+  if (typeof window === "undefined") return EMPTY_AUTH
+  try {
+    const stored = localStorage.getItem("fidel_auth")
+    if (!stored) return EMPTY_AUTH
+    const parsed = JSON.parse(stored)
+    if (
+      parsed &&
+      typeof parsed.token === "string" &&
+      typeof parsed.customerId === "string" &&
+      typeof parsed.email === "string"
+    ) {
+      return parsed as AuthState
+    }
+    localStorage.removeItem("fidel_auth")
+    return EMPTY_AUTH
+  } catch {
+    try { localStorage.removeItem("fidel_auth") } catch { /* ignore */ }
+    return EMPTY_AUTH
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuth] = useState<AuthState>(() => {
-    const stored = localStorage.getItem("fidel_auth")
-    if (stored) {
-      const parsed = JSON.parse(stored) as AuthState
-      setToken(parsed.token)
-      return parsed
-    }
-    return { token: "", customerId: "", email: "" }
+    const initial = readStoredAuth()
+    if (initial.token) setToken(initial.token)
+    return initial
   })
 
   useEffect(() => {
