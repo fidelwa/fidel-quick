@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	_ "embed"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -112,11 +113,20 @@ func SetupRouter(
 }
 
 // registerAdminSPA monta el bundle React en /admin/* con SPA fallback:
-// rutas client-side (ej. /admin/dashboard) que no matchean un asset
-// devuelven index.html para que React Router las maneje.
+// rutas client-side (ej. /admin/registro) que no matchean un asset
+// del bundle se sirven con index.html para que React Router las maneje.
 func registerAdminSPA(r *gin.Engine, spa fs.FS) {
 	httpFS := http.FS(spa)
 	fileServer := http.StripPrefix("/admin/", http.FileServer(httpFS))
+
+	// Pre-leer index.html una sola vez para servir el fallback SPA
+	// directamente (sin pasar por http.FileServer, que tiene un
+	// comportamiento built-in de redirigir cualquier path que termine
+	// en "/index.html" a "./", lo cual rompía los deep-links del SPA:
+	// GET /admin/registro → fallback intenta servir /admin/index.html
+	// → FileServer redirige 301 a "./" → el browser termina en /admin/
+	// y el SPA no puede llegar a la ruta original.
+	indexBytes, indexErr := readAllFS(spa, "index.html")
 
 	// Bare / redirige al SPA — UX para cuando alguien comparte la URL
 	// raíz del servicio. /healthz, /readyz, /webhook tienen handlers
@@ -129,18 +139,38 @@ func registerAdminSPA(r *gin.Engine, spa fs.FS) {
 	})
 	r.GET("/admin/*filepath", func(c *gin.Context) {
 		path := strings.TrimPrefix(c.Param("filepath"), "/")
-		if path == "" {
-			path = "index.html"
+		if path == "" || path == "index.html" {
+			serveSPAIndex(c, indexBytes, indexErr)
+			return
 		}
+		// Asset real (assets/*.js, /vite.svg, etc.) → FileServer normal.
 		if f, err := spa.Open(path); err == nil {
 			_ = f.Close()
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			return
 		}
-		// SPA fallback.
-		c.Request.URL.Path = "/admin/index.html"
-		fileServer.ServeHTTP(c.Writer, c.Request)
+		// SPA fallback para deep-links sin asset (ej. /admin/registro,
+		// /admin/onboarding) — index.html servido inline, no redirect.
+		serveSPAIndex(c, indexBytes, indexErr)
 	})
+}
+
+func readAllFS(fsys fs.FS, name string) ([]byte, error) {
+	f, err := fsys.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
+}
+
+func serveSPAIndex(c *gin.Context, indexBytes []byte, indexErr error) {
+	if indexErr != nil {
+		c.String(http.StatusInternalServerError, "admin bundle missing index.html")
+		return
+	}
+	c.Header("Cache-Control", "no-cache")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", indexBytes)
 }
 
 // readyzHandler verifica conectividad con Postgres y Redis con timeout 1s.
