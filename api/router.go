@@ -173,21 +173,33 @@ func serveSPAIndex(c *gin.Context, indexBytes []byte, indexErr error) {
 	c.Data(http.StatusOK, "text/html; charset=utf-8", indexBytes)
 }
 
+// pingFunc verifica una dependencia dado un contexto (respeta su deadline).
+type pingFunc func(ctx context.Context) error
+
 // readyzHandler verifica conectividad con Postgres y Redis con timeout 1s.
 // Devuelve 200 si ambos OK, 503 con detalle del fallo.
 func readyzHandler(database *sql.DB, redisClient *redis.Client) gin.HandlerFunc {
+	return readyzHandlerFor(
+		database.PingContext,
+		func(ctx context.Context) error { return redisClient.Ping(ctx).Err() },
+	)
+}
+
+// readyzHandlerFor construye el handler a partir de pingers inyectables.
+// Producción usa Postgres/Redis reales; los tests inyectan fakes.
+func readyzHandlerFor(pingPostgres, pingRedis pingFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
 		defer cancel()
 
-		if err := database.PingContext(ctx); err != nil {
+		if err := pingPostgres(ctx); err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"status":   "not_ready",
 				"postgres": err.Error(),
 			})
 			return
 		}
-		if err := redisClient.Ping(ctx).Err(); err != nil {
+		if err := pingRedis(ctx); err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"status": "not_ready",
 				"redis":  err.Error(),
