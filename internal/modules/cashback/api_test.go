@@ -61,7 +61,7 @@ func TestCreateReward_API(t *testing.T) {
 
 	body := `{"name":"Descuento $5","cost":5.0}`
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/v1/customer-sisfi/cs-1/rewards", strings.NewReader(body))
+	req, _ := http.NewRequest("POST", "/api/v1/cashback-programs/cs-1/rewards", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -79,7 +79,7 @@ func TestListRewards_API(t *testing.T) {
 	r := setupAPIRouter(repo)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/customer-sisfi/cs-1/rewards", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/cashback-programs/cs-1/rewards", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
@@ -98,7 +98,7 @@ func TestGetClientBalance_API(t *testing.T) {
 	r := setupAPIRouter(repo)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/customer-sisfi/cs-1/clients/client-1/balance", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/cashback-programs/cs-1/clients/client-1/balance", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
@@ -119,7 +119,7 @@ func TestGetClientTransactions_API(t *testing.T) {
 	r := setupAPIRouter(repo)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/customer-sisfi/cs-1/clients/client-1/transactions", nil)
+	req, _ := http.NewRequest("GET", "/api/v1/cashback-programs/cs-1/clients/client-1/transactions", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, 200, w.Code)
@@ -134,7 +134,7 @@ func TestUpdateReward_API(t *testing.T) {
 
 	body := `{"name":"Updated","cost":10.0}`
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/v1/customer-sisfi/cs-1/rewards/rw-1", strings.NewReader(body))
+	req, _ := http.NewRequest("PUT", "/api/v1/cashback-programs/cs-1/rewards/rw-1", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
