@@ -89,6 +89,15 @@ func (m *fakeModule) FlowDefinitions() map[string]loyalty.FlowDefinition {
 	}
 }
 
+func (m *fakeModule) Prefixes() []string { return []string{"reward:"} }
+
+func (m *fakeModule) SelectionFlow(prefix string) (commandID string, dataKey string) {
+	if prefix == "reward:" {
+		return "request_redemption", "reward_id"
+	}
+	return "", ""
+}
+
 func (m *fakeModule) HandleCommand(ctx context.Context, cmd loyalty.Command) (*loyalty.CommandResult, error) {
 	if m.result != nil {
 		return m.result, m.err
