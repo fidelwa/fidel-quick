@@ -21,6 +21,7 @@ import (
 	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/cache"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/db"
+	"github.com/theluisbolivar/fidel-quick/internal/platform/email"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/logger"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/storage"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/whatsapp"
@@ -147,6 +148,10 @@ func main() {
 		log.Warn("GOOGLE_CLIENT_ID not set — Google login/signup disabled")
 	}
 	adminService := admin.NewService(adminRepo, cfg.JWTSecret, googleVerifier)
+	// Password reset (FID-16): email sender + reset link base URL.
+	emailSender := email.NewSender(cfg.EmailProvider, cfg.EmailFrom, log)
+	adminService.WithPasswordReset(emailSender, cfg.AppURL, log)
+	log.Info("password reset enabled", "email_provider", cfg.EmailProvider, "app_url", cfg.AppURL)
 	adminAPI := admin.NewAPIHandler(adminService)
 
 	// Onboarding

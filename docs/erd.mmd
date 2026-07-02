@@ -90,6 +90,15 @@ erDiagram
         timestamptz updated_at
     }
 
+    password_reset_tokens {
+        uuid id PK
+        uuid admin_id FK
+        text token_hash UK
+        timestamptz expires_at
+        timestamptz used_at
+        timestamptz created_at
+    }
+
     collaborators {
         uuid id PK
         uuid customer_id FK
@@ -262,6 +271,7 @@ erDiagram
     %% Customer → entidades
     customers ||--o{ customer_sisfi : "activa sistemas"
     customers ||--o{ admins : "tiene"
+    admins ||--o{ password_reset_tokens : "resetea"
     customers ||--o| onboarding : "estado"
     customers ||--o{ collaborators : "emplea"
     customers ||--o{ clients : "atiende"
