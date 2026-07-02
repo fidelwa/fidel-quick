@@ -129,6 +129,42 @@ func TestGetClientTransactions_API(t *testing.T) {
 	assert.Len(t, txs, 1)
 }
 
+// TestOldCustomerSisfiPrefix_Returns404 is a regression guard: the routes were
+// renamed from the legacy /customer-sisfi/... prefix to /cashback-programs/...
+// (the current, correct prefix). If someone reintroduces the old prefix or the
+// mount changes, these must stay 404 so we notice the wiring regression. We also
+// assert the new prefix is live so the test can't pass by an unrelated 404.
+func TestOldCustomerSisfiPrefix_Returns404(t *testing.T) {
+	r := setupAPIRouter(&mockRepo{
+		listProgramsFn: func(_ context.Context, _ string) ([]CashbackProgram, error) {
+			return nil, nil
+		},
+	})
+
+	legacyPaths := []struct {
+		method, path string
+	}{
+		{"GET", "/api/v1/customer-sisfi?customer_id=cust-1"},
+		{"GET", "/api/v1/customer-sisfi/cs-1/rewards"},
+		{"POST", "/api/v1/customer-sisfi/cs-1/rewards"},
+		{"GET", "/api/v1/customer-sisfi/cs-1/clients/client-1/balance"},
+	}
+	for _, tc := range legacyPaths {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(tc.method, tc.path, nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code,
+			"legacy prefix must 404: %s %s", tc.method, tc.path)
+	}
+
+	// Sanity: the current prefix is actually mounted (guards against a bogus pass
+	// where everything 404s).
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/cashback-programs?customer_id=cust-1", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "current /cashback-programs prefix should be live")
+}
+
 func TestUpdateReward_API(t *testing.T) {
 	r := setupAPIRouter(&mockRepo{})
 

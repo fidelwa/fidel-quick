@@ -161,6 +161,9 @@ func (m *Module) handleUndoStamp(ctx context.Context, cmd loyalty.Command) (*loy
 		if errors.Is(err, ErrNoStampToUndo) {
 			return &loyalty.CommandResult{Message: "No hay un sello tuyo dentro de las últimas 2 horas."}, nil
 		}
+		if errors.Is(err, ErrCardCancelled) {
+			return &loyalty.CommandResult{Message: "Esa tarjeta venció y fue cancelada; no se puede deshacer el sello."}, nil
+		}
 		return nil, err
 	}
 	return &loyalty.CommandResult{Message: "Último sello deshecho."}, nil

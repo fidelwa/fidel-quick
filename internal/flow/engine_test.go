@@ -48,6 +48,9 @@ func (m *mockSender) SendInteractiveList(ctx context.Context, to, header, body s
 type fakeModule struct {
 	result *loyalty.CommandResult
 	err    error
+	// lastCmd records the last command dispatched to HandleCommand so tests can
+	// assert routing (which command ID / data actually reached the module).
+	lastCmd *loyalty.Command
 }
 
 func (m *fakeModule) Name() string { return "test_mod" }
@@ -86,6 +89,16 @@ func (m *fakeModule) FlowDefinitions() map[string]loyalty.FlowDefinition {
 				{ID: "step2", Prompt: "Confirm:", Key: "confirm"},
 			},
 		},
+		// request_redemption is the flow the "reward:" prefix routes to (see
+		// SelectionFlow). Its single step is keyed on reward_id, which the prefix
+		// already supplies, so startFlowWithData dispatches it immediately and we
+		// can observe the routed command via HandleCommand.
+		"request_redemption": {
+			CommandID: "request_redemption",
+			Steps: []loyalty.StepDefinition{
+				{ID: "step1", Prompt: "Confirm reward:", Key: "reward_id"},
+			},
+		},
 	}
 }
 
@@ -99,6 +112,8 @@ func (m *fakeModule) SelectionFlow(prefix string) (commandID string, dataKey str
 }
 
 func (m *fakeModule) HandleCommand(ctx context.Context, cmd loyalty.Command) (*loyalty.CommandResult, error) {
+	cp := cmd
+	m.lastCmd = &cp
 	if m.result != nil {
 		return m.result, m.err
 	}
@@ -377,12 +392,22 @@ func TestEngine_HandleMenuSelection_RewardPrefix(t *testing.T) {
 		ActiveModules: []string{"test_mod"},
 	}
 
-	// reward: prefix should route to request_redemption flow
+	// reward:rw-123 should route via ResolveSelection → SelectionFlow("reward:")
+	// → command "request_redemption" with data {reward_id: "rw-123"}. Since that
+	// flow's only step (reward_id) is already satisfied by the prefix, the engine
+	// dispatches it immediately to the module's HandleCommand.
 	err := engine.handleMenuSelection(context.Background(), user, "reward:rw-123")
+	require.NoError(t, err)
 
-	// This will fail because request_redemption is not defined in our fake module,
-	// but we can verify the flow was attempted
-	_ = err // Expected to fail gracefully
+	// The prefix must have routed to the request_redemption command, not the raw
+	// selection ID, and the reward id must have been extracted into the data map.
+	require.NotNil(t, mod.lastCmd, "expected reward: prefix to dispatch a command")
+	assert.Equal(t, "request_redemption", mod.lastCmd.ID)
+	assert.Equal(t, "rw-123", mod.lastCmd.Data["reward_id"])
+
+	// And the command's result must have been delivered to the user.
+	require.Len(t, sender.sentTexts, 1)
+	assert.Equal(t, "Handled: request_redemption", sender.sentTexts[0].text)
 }
 
 func TestEngine_SendResult_WithOptions(t *testing.T) {
@@ -443,12 +468,26 @@ func TestEngine_SendResult_PlainText(t *testing.T) {
 }
 
 func TestEngine_ResetFlow(t *testing.T) {
-	// ResetFlow with a nil Redis client should not be called in production,
-	// but we verify the Engine struct can be constructed without crashing on setup.
+	store := newMemoryStore()
 	engine := &Engine{
-		store: newMemoryStore(),
+		store: store,
 		log:   testLogger(),
 	}
-	// Verify engine was created successfully
-	assert.NotNil(t, engine)
+	ctx := context.Background()
+
+	// Seed an active flow state for the user.
+	fs := &State{CurrentFlow: "flow_cmd", CurrentStep: 1, CollectedData: map[string]string{"value": "x"}}
+	require.NoError(t, store.Set(ctx, "+123", "cust-1", fs))
+
+	// Precondition: state is present.
+	got, err := store.Get(ctx, "+123", "cust-1")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	// ResetFlow must clear it.
+	engine.ResetFlow(ctx, "+123", "cust-1")
+
+	got, err = store.Get(ctx, "+123", "cust-1")
+	require.NoError(t, err)
+	assert.Nil(t, got, "ResetFlow should delete the active flow state")
 }
