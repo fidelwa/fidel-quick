@@ -39,6 +39,15 @@ type Reward struct {
 	Description     string `json:"description"`
 	PointsCost      int    `json:"points_cost"`
 	Active          bool   `json:"active"`
+
+	// FID-38 (stock): disponibilidad limitada del premio.
+	// StockTotal nil = stock ilimitado (comportamiento por defecto).
+	// RedeemedCount es cuántas unidades ya se canjearon; se incrementa de forma
+	// atómica dentro de la transacción del burn.
+	// LimitPerClient nil = sin límite por cliente (reservado para uso futuro).
+	StockTotal     *int `json:"stock_total"`
+	RedeemedCount  int  `json:"redeemed_count"`
+	LimitPerClient *int `json:"limit_per_client"`
 }
 
 type Redemption struct {

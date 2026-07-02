@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { useAuth } from "@/context/auth-context"
 import { useCashbackPrograms, useUpdateCashbackProgram } from "@/hooks/use-cashback-programs"
 import { useCashbackRewards, useCreateCashbackReward, useUpdateCashbackReward } from "@/hooks/use-cashback-rewards"
+import type { CashbackReward } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -31,6 +32,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -63,6 +65,10 @@ const rewardSchema = z.object({
   name: z.string().min(1, "El nombre es requerido"),
   description: z.string(),
   cost: z.number().min(0.01, "Debe ser mayor a 0"),
+  // FID-38: stock opcional. Cadena vacía = ilimitado. Entero >= 0 si se define.
+  stock_total: z
+    .string()
+    .refine((v) => v === "" || (/^\d+$/.test(v) && Number(v) >= 0), "Debe ser un entero mayor o igual a 0"),
 })
 
 type ProgramFormValues = z.infer<typeof programSchema>
@@ -93,7 +99,7 @@ export function CashbackDetailPage() {
 
   const rewardForm = useForm<RewardFormValues>({
     resolver: zodResolver(rewardSchema),
-    defaultValues: { name: "", description: "", cost: 1 },
+    defaultValues: { name: "", description: "", cost: 1, stock_total: "" },
   })
 
   useEffect(() => {
@@ -150,7 +156,14 @@ export function CashbackDetailPage() {
   }
 
   const onCreateReward = (values: RewardFormValues) => {
-    createReward.mutate(values, {
+    // FID-38: cadena vacía => null (stock ilimitado).
+    const payload = {
+      name: values.name,
+      description: values.description,
+      cost: values.cost,
+      stock_total: values.stock_total === "" ? null : Number(values.stock_total),
+    }
+    createReward.mutate(payload, {
       onSuccess: () => {
         toast.success("Beneficio creado")
         rewardForm.reset()
@@ -160,11 +173,17 @@ export function CashbackDetailPage() {
     })
   }
 
-  const onToggleReward = (rewardId: string, active: boolean) => {
-    updateReward.mutate({ rewardId, active }, {
-      onSuccess: () => toast.success(active ? "Beneficio activado" : "Beneficio desactivado"),
-      onError: (err) => toast.error(err.message),
-    })
+  const onToggleReward = (reward: CashbackReward, active: boolean) => {
+    // FID-38 (full-replace en stock): el PUT limpia stock_total si no se envía,
+    // así que al alternar "activo" re-enviamos el stock actual del beneficio para
+    // no borrarlo.
+    updateReward.mutate(
+      { rewardId: reward.id, active, stock_total: reward.stock_total ?? null },
+      {
+        onSuccess: () => toast.success(active ? "Beneficio activado" : "Beneficio desactivado"),
+        onError: (err) => toast.error(err.message),
+      },
+    )
   }
 
   if (loadingPrograms) {
@@ -355,6 +374,20 @@ export function CashbackDetailPage() {
                       </FormItem>
                     )}
                   />
+                  <FormField
+                    control={rewardForm.control}
+                    name="stock_total"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Stock (opcional)</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={0} placeholder="Vacío = ilimitado" {...field} />
+                        </FormControl>
+                        <FormDescription>Deja vacío para stock ilimitado.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                   <Button type="submit" disabled={createReward.isPending}>
                     {createReward.isPending ? "Creando..." : "Crear"}
                   </Button>
@@ -381,6 +414,7 @@ export function CashbackDetailPage() {
                 <TableHead>Nombre</TableHead>
                 <TableHead>Descripcion</TableHead>
                 <TableHead>Costo</TableHead>
+                <TableHead>Stock</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="w-20">Activo</TableHead>
               </TableRow>
@@ -392,6 +426,11 @@ export function CashbackDetailPage() {
                   <TableCell className="text-muted-foreground">{r.description || "—"}</TableCell>
                   <TableCell>{formatCurrency(r.cost)}</TableCell>
                   <TableCell>
+                    {r.stock_total == null
+                      ? "Ilimitado"
+                      : `${Math.max(0, r.stock_total - r.redeemed_count)} / ${r.stock_total}`}
+                  </TableCell>
+                  <TableCell>
                     <Badge variant={r.active ? "default" : "secondary"}>
                       {r.active ? "Activo" : "Inactivo"}
                     </Badge>
@@ -399,7 +438,7 @@ export function CashbackDetailPage() {
                   <TableCell>
                     <Switch
                       checked={r.active}
-                      onCheckedChange={(checked) => onToggleReward(r.id, checked)}
+                      onCheckedChange={(checked) => onToggleReward(r, checked)}
                     />
                   </TableCell>
                 </TableRow>

@@ -244,6 +244,11 @@ func (s *Service) RequestRedemption(ctx context.Context, req CashbackRedemptionR
 	}
 
 	if err := s.repo.BurnCashbackTx(ctx, tx, rd); err != nil {
+		// FID-38: premio agotado. El burn se revirtió completo (no se gastó saldo
+		// ni se creó canje). Error tipado para respuesta clara al cliente.
+		if errors.Is(err, ErrRewardOutOfStock) {
+			return nil, "", apperror.Conflict("premio agotado", err)
+		}
 		return nil, "", fmt.Errorf("burn cashback: %w", err)
 	}
 

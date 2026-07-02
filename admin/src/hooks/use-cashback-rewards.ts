@@ -13,7 +13,7 @@ export function useCashbackRewards(programId: string) {
 export function useCreateCashbackReward(programId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (data: { name: string; description: string; cost: number }) => {
+    mutationFn: async (data: { name: string; description: string; cost: number; stock_total?: number | null }) => {
       const resp = await createCashbackReward(programId, data)
       return { ...data, ...resp } as CashbackReward
     },
@@ -26,7 +26,7 @@ export function useCreateCashbackReward(programId: string) {
 export function useUpdateCashbackReward(programId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ rewardId, ...data }: { rewardId: string } & Partial<Pick<CashbackReward, "name" | "description" | "cost" | "active">>) =>
+    mutationFn: ({ rewardId, ...data }: { rewardId: string } & Partial<Pick<CashbackReward, "name" | "description" | "cost" | "active" | "stock_total">>) =>
       updateCashbackReward(programId, rewardId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cashback-rewards", programId] })

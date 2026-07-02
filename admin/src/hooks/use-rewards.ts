@@ -13,7 +13,7 @@ export function useRewards(programId: string) {
 export function useCreateReward(programId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (data: { name: string; description: string; points_cost: number }) => {
+    mutationFn: async (data: { name: string; description: string; points_cost: number; stock_total?: number | null }) => {
       const resp = await createReward(programId, data)
       return { ...data, ...resp } as Reward
     },
@@ -26,7 +26,7 @@ export function useCreateReward(programId: string) {
 export function useUpdateReward(programId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ rewardId, ...data }: { rewardId: string } & Partial<Pick<Reward, "name" | "description" | "points_cost" | "active">>) =>
+    mutationFn: ({ rewardId, ...data }: { rewardId: string } & Partial<Pick<Reward, "name" | "description" | "points_cost" | "active" | "stock_total">>) =>
       updateReward(programId, rewardId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["rewards", programId] })

@@ -53,6 +53,10 @@ export interface Reward {
   description: string
   points_cost: number
   active: boolean
+  // FID-38: stock/disponibilidad limitada. null = ilimitado.
+  stock_total: number | null
+  redeemed_count: number
+  limit_per_client: number | null
 }
 
 export interface CashbackProgram {
@@ -79,6 +83,10 @@ export interface CashbackReward {
   description: string
   cost: number
   active: boolean
+  // FID-38: stock/disponibilidad limitada. null = ilimitado.
+  stock_total: number | null
+  redeemed_count: number
+  limit_per_client: number | null
 }
 
 export interface Client {

@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { useAuth } from "@/context/auth-context"
 import { usePrograms, useUpdateProgram } from "@/hooks/use-programs"
 import { useRewards, useCreateReward, useUpdateReward } from "@/hooks/use-rewards"
+import type { Reward } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -31,6 +32,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -56,6 +58,10 @@ const rewardSchema = z.object({
   name: z.string().min(1, "El nombre es requerido"),
   description: z.string(),
   points_cost: z.number().int().min(1, "Debe ser al menos 1"),
+  // FID-38: stock opcional. Cadena vacía = ilimitado. Entero >= 0 si se define.
+  stock_total: z
+    .string()
+    .refine((v) => v === "" || (/^\d+$/.test(v) && Number(v) >= 0), "Debe ser un entero mayor o igual a 0"),
 })
 
 type ProgramFormValues = z.infer<typeof programSchema>
@@ -81,7 +87,7 @@ export function ProgramDetailPage() {
 
   const rewardForm = useForm<RewardFormValues>({
     resolver: zodResolver(rewardSchema),
-    defaultValues: { name: "", description: "", points_cost: 1 },
+    defaultValues: { name: "", description: "", points_cost: 1, stock_total: "" },
   })
 
   useEffect(() => {
@@ -130,7 +136,14 @@ export function ProgramDetailPage() {
   }
 
   const onCreateReward = (values: RewardFormValues) => {
-    createReward.mutate(values, {
+    // FID-38: cadena vacía => null (stock ilimitado).
+    const payload = {
+      name: values.name,
+      description: values.description,
+      points_cost: values.points_cost,
+      stock_total: values.stock_total === "" ? null : Number(values.stock_total),
+    }
+    createReward.mutate(payload, {
       onSuccess: () => {
         toast.success("Recompensa creada")
         rewardForm.reset()
@@ -140,11 +153,17 @@ export function ProgramDetailPage() {
     })
   }
 
-  const onToggleReward = (rewardId: string, active: boolean) => {
-    updateReward.mutate({ rewardId, active }, {
-      onSuccess: () => toast.success(active ? "Recompensa activada" : "Recompensa desactivada"),
-      onError: (err) => toast.error(err.message),
-    })
+  const onToggleReward = (reward: Reward, active: boolean) => {
+    // FID-38 (full-replace en stock, como el programa en LG-1): el PUT limpia
+    // stock_total si no se envía, así que al alternar "activo" re-enviamos el
+    // stock actual del premio para no borrarlo.
+    updateReward.mutate(
+      { rewardId: reward.id, active, stock_total: reward.stock_total ?? null },
+      {
+        onSuccess: () => toast.success(active ? "Recompensa activada" : "Recompensa desactivada"),
+        onError: (err) => toast.error(err.message),
+      },
+    )
   }
 
   const onImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -365,6 +384,20 @@ export function ProgramDetailPage() {
                       </FormItem>
                     )}
                   />
+                  <FormField
+                    control={rewardForm.control}
+                    name="stock_total"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Stock (opcional)</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={0} placeholder="Vacío = ilimitado" {...field} />
+                        </FormControl>
+                        <FormDescription>Deja vacío para stock ilimitado.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                   <Button type="submit" disabled={createReward.isPending}>
                     {createReward.isPending ? "Creando..." : "Crear"}
                   </Button>
@@ -392,6 +425,7 @@ export function ProgramDetailPage() {
                 <TableHead>Nombre</TableHead>
                 <TableHead>Descripcion</TableHead>
                 <TableHead>Costo</TableHead>
+                <TableHead>Stock</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="w-20">Activo</TableHead>
               </TableRow>
@@ -403,6 +437,11 @@ export function ProgramDetailPage() {
                   <TableCell className="text-muted-foreground">{r.description || "—"}</TableCell>
                   <TableCell>{formatPoints(r.points_cost)} pts</TableCell>
                   <TableCell>
+                    {r.stock_total == null
+                      ? "Ilimitado"
+                      : `${Math.max(0, r.stock_total - r.redeemed_count)} / ${r.stock_total}`}
+                  </TableCell>
+                  <TableCell>
                     <Badge variant={r.active ? "default" : "secondary"}>
                       {r.active ? "Activo" : "Inactivo"}
                     </Badge>
@@ -410,7 +449,7 @@ export function ProgramDetailPage() {
                   <TableCell>
                     <Switch
                       checked={r.active}
-                      onCheckedChange={(checked) => onToggleReward(r.id, checked)}
+                      onCheckedChange={(checked) => onToggleReward(r, checked)}
                     />
                   </TableCell>
                 </TableRow>
