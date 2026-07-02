@@ -36,3 +36,7 @@ func Internal(message string, cause error) *AppError {
 func Conflict(message string, cause error) *AppError {
 	return &AppError{Code: "conflict", Message: message, HTTPStatus: 409, Cause: cause}
 }
+
+func TooManyRequests(message string, cause error) *AppError {
+	return &AppError{Code: "too_many_requests", Message: message, HTTPStatus: 429, Cause: cause}
+}

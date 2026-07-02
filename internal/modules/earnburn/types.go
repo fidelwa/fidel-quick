@@ -1,6 +1,10 @@
 package earnburn
 
-import "time"
+import (
+	"time"
+
+	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
+)
 
 type Transaction struct {
 	ID                    string     `json:"id"`
@@ -17,6 +21,14 @@ type Transaction struct {
 	CorrectionEvidenceURL string     `json:"correction_evidence_url"`
 	CorrectableUntil      *time.Time `json:"correctable_until"`
 	CreatedAt             time.Time  `json:"created_at"`
+
+	// Anti-fraude (FID-33): huella del ticket. ReceiptData es el JSON del
+	// extract completo; ReceiptHash es "" cuando no se pudo computar un hash
+	// confiable (folio ausente o extract no confiable).
+	ReceiptData       []byte   `json:"-"`
+	ReceiptHash       string   `json:"receipt_hash,omitempty"`
+	ReceiptHashFields []string `json:"receipt_hash_fields,omitempty"`
+	ReceiptConfident  bool     `json:"receipt_confident,omitempty"`
 }
 
 type Reward struct {
@@ -66,6 +78,9 @@ type AddPointsReq struct {
 	Amount          float64 // purchase amount in currency
 	InvoiceURL      string
 	ManualEntry     bool
+	// Invoice is the full AI extract of the receipt (may be nil for manual/legacy
+	// entries). When present it is persisted and used to compute the dedup hash.
+	Invoice *ai.InvoiceResult
 }
 
 type UpdatePointsReq struct {

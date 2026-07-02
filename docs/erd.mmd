@@ -66,6 +66,7 @@ erDiagram
         uuid customer_sisfi_id FK_UK
         int card_slots "DEFAULT 10, CHECK > 0"
         uuid reward_on_complete "nullable"
+        int card_expiry_days "nullable, CHECK > 0; null = sin expiración"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -94,6 +95,15 @@ erDiagram
         boolean active
         timestamptz created_at
         timestamptz updated_at
+    }
+
+    password_reset_tokens {
+        uuid id PK
+        uuid admin_id FK
+        text token_hash UK
+        timestamptz expires_at
+        timestamptz used_at
+        timestamptz created_at
     }
 
     collaborators {
@@ -163,6 +173,10 @@ erDiagram
         text correction_reason
         text correction_evidence_url
         timestamptz correctable_until
+        jsonb receipt_data "extract IA completo (anti-fraude)"
+        text receipt_hash "SHA-256 canónico; UNIQUE(customer_sisfi_id, receipt_hash) parcial"
+        text_array receipt_hash_fields "campos usados en el hash"
+        boolean receipt_confident "flag de confianza del extract"
         timestamptz created_at
     }
 
@@ -220,6 +234,10 @@ erDiagram
         text correction_reason
         text correction_evidence_url
         timestamptz correctable_until
+        jsonb receipt_data "extract IA completo (anti-fraude)"
+        text receipt_hash "SHA-256 canónico; UNIQUE(customer_sisfi_id, receipt_hash) parcial"
+        text_array receipt_hash_fields "campos usados en el hash"
+        boolean receipt_confident "flag de confianza del extract"
         timestamptz created_at
     }
 
@@ -268,6 +286,7 @@ erDiagram
     %% Customer → entidades
     customers ||--o{ customer_sisfi : "activa sistemas"
     customers ||--o{ admins : "tiene"
+    admins ||--o{ password_reset_tokens : "resetea"
     customers ||--o| onboarding : "estado"
     customers ||--o{ collaborators : "emplea"
     customers ||--o{ clients : "atiende"

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
+	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
 )
 
 const (
@@ -91,8 +92,23 @@ func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*Cashbac
 		CorrectableUntil: &correctableUntil,
 	}
 
+	// Anti-fraude (FID-33): persistir el extract y calcular el hash de dedup.
+	if req.Invoice != nil {
+		fp, err := ai.ComputeFingerprint(req.Invoice)
+		if err != nil {
+			return nil, fmt.Errorf("compute receipt fingerprint: %w", err)
+		}
+		tx.ReceiptData = fp.Data
+		tx.ReceiptHash = fp.Hash
+		tx.ReceiptHashFields = fp.HashFields
+		tx.ReceiptConfident = fp.Confident
+	}
+
 	newBalance, err := s.repo.AddCashbackTx(ctx, tx)
 	if err != nil {
+		if errors.Is(err, ErrDuplicateReceipt) {
+			return nil, apperror.Conflict("ticket ya registrado", err)
+		}
 		return nil, fmt.Errorf("add cashback tx: %w", err)
 	}
 

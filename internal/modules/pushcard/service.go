@@ -42,6 +42,11 @@ func (s *Service) GetProgress(ctx context.Context, customerSisfiID, clientID str
 		return nil, fmt.Errorf("get open card: %w", err)
 	}
 
+	card, err = s.expireIfStale(ctx, cfg, card)
+	if err != nil {
+		return nil, err
+	}
+
 	if card == nil {
 		return &CardProgress{
 			HasOpenCard: false,
@@ -81,6 +86,11 @@ func (s *Service) AddStamp(ctx context.Context, req AddStampReq) (*AddStampResul
 	card, err := s.repo.GetOpenCard(ctx, req.CustomerSisfiID, req.ClientID)
 	if err != nil {
 		return nil, fmt.Errorf("get open card: %w", err)
+	}
+	// Lazily expire a stale open card so the next stamp opens a fresh one.
+	card, err = s.expireIfStale(ctx, cfg, card)
+	if err != nil {
+		return nil, err
 	}
 	if card == nil {
 		card, err = s.repo.OpenCard(ctx, req.CustomerSisfiID, req.ClientID)
@@ -251,7 +261,34 @@ func (s *Service) UpsertConfig(ctx context.Context, cfg *Config) error {
 	if cfg.CardSlots <= 0 {
 		return fmt.Errorf("card_slots debe ser mayor a 0")
 	}
+	if cfg.CardExpiryDays != nil && *cfg.CardExpiryDays <= 0 {
+		return fmt.Errorf("card_expiry_days debe ser mayor a 0 o vacío")
+	}
 	return s.repo.UpsertConfig(ctx, cfg)
+}
+
+// expireIfStale cancels an 'open' card whose age exceeds cfg.CardExpiryDays
+// (measured from created_at) and returns nil so callers treat it as absent.
+// When expiry is disabled (nil) or the card is still within its lifetime, the
+// card is returned unchanged. A nil card passes through untouched.
+func (s *Service) expireIfStale(ctx context.Context, cfg *Config, card *Card) (*Card, error) {
+	if card == nil || cfg == nil || cfg.CardExpiryDays == nil {
+		return card, nil
+	}
+	ttl := time.Duration(*cfg.CardExpiryDays) * 24 * time.Hour
+	if time.Since(card.CreatedAt) < ttl {
+		return card, nil
+	}
+	if err := s.repo.CancelCard(ctx, card.ID); err != nil {
+		return nil, fmt.Errorf("cancel expired card: %w", err)
+	}
+	s.log.Info("pushcard.card.expired",
+		"card_id", card.ID,
+		"client_id", card.ClientID,
+		"created_at", card.CreatedAt,
+		"expiry_days", *cfg.CardExpiryDays,
+	)
+	return nil, nil
 }
 
 // ListCards returns recent cards for admin views.
