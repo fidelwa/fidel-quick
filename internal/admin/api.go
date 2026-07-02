@@ -15,11 +15,14 @@ func NewAPIHandler(service *Service) *APIHandler {
 	return &APIHandler{service: service}
 }
 
-// RegisterRoutes registers public auth endpoints (login, register, login/google).
+// RegisterRoutes registers public auth endpoints (login, register, login/google,
+// forgot/reset password).
 func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/login", h.Login)
 	rg.POST("/login/google", h.GoogleLogin)
 	rg.POST("/register", h.Register)
+	rg.POST("/forgot-password", h.ForgotPassword)
+	rg.POST("/reset-password", h.ResetPassword)
 }
 
 // RegisterAuthenticatedRoutes registers endpoints that require a valid admin
@@ -84,6 +87,42 @@ func (h *APIHandler) Register(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, resp)
+}
+
+// ForgotPassword always responds 200 (with a neutral message) to avoid
+// leaking which emails are registered. Only rate-limit / infra failures
+// surface as non-200 via the error middleware.
+func (h *APIHandler) ForgotPassword(c *gin.Context) {
+	var req ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "email es requerido"})
+		return
+	}
+
+	if err := h.service.ForgotPassword(c.Request.Context(), req.Email); err != nil {
+		c.Error(toAppError(err)) //nolint:errcheck
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Si el email está registrado, enviaremos un enlace para restablecer la contraseña.",
+	})
+}
+
+// ResetPassword validates the token and sets the new password.
+func (h *APIHandler) ResetPassword(c *gin.Context) {
+	var req ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token y new_password (min 8) son requeridos"})
+		return
+	}
+
+	if err := h.service.ResetPassword(c.ClientIP(), req.Token, req.NewPassword); err != nil {
+		c.Error(toAppError(err)) //nolint:errcheck
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Contraseña actualizada correctamente."})
 }
 
 func (h *APIHandler) GoogleLogin(c *gin.Context) {

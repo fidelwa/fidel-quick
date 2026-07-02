@@ -189,6 +189,20 @@ export const registerAdmin = (email: string, password: string, customer_id: stri
     body: JSON.stringify({ email, password, customer_id }),
   })
 
+// Password reset (FID-16)
+// forgotPassword responde 200 siempre (no revela si el email existe).
+export const forgotPassword = (email: string) =>
+  request<{ message: string }>(`/auth/forgot-password`, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  })
+
+export const resetPassword = (token: string, new_password: string) =>
+  request<{ message: string }>(`/auth/reset-password`, {
+    method: "POST",
+    body: JSON.stringify({ token, new_password }),
+  })
+
 // Onboarding
 export const onboardingRegister = (data: OnboardingRegisterRequest) =>
   request<AuthResponse>(`/onboarding/register`, {

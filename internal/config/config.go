@@ -23,6 +23,13 @@ type Config struct {
 	PlatformURL           string
 	BearerToken           string
 	JWTSecret             string
+	// Password reset email (FID-16). EmailProvider selects the delivery
+	// backend ("stdout" logs the link — the dev default). EmailFrom is the
+	// From: address. AppURL is the public admin base used to build the
+	// reset link (<AppURL>/reset-password?token=...).
+	EmailProvider string
+	EmailFrom     string
+	AppURL        string
 }
 
 func Load() *Config {
@@ -47,6 +54,9 @@ func Load() *Config {
 		PlatformURL:           getEnv("PLATFORM_URL", ""),
 		BearerToken:           getEnv("BEARER_TOKEN", ""),
 		JWTSecret:             getEnv("JWT_SECRET", "change-me-in-production"),
+		EmailProvider:         getEnv("EMAIL_PROVIDER", "stdout"),
+		EmailFrom:             getEnv("EMAIL_FROM", "no-reply@fidel.app"),
+		AppURL:                getEnv("APP_URL", "http://localhost:5173"),
 	}
 }
 
