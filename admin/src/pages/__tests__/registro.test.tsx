@@ -6,7 +6,19 @@ import { RegistroPage } from "../registro"
 
 const mockFetch = vi.fn()
 
+// checkPhoneExists() -> request() -> fetch(). Devolvemos un Response-like con
+// { exists } para que el check de teléfono resuelva a "available"/"exists".
+function phoneCheckResponse(exists: boolean) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ exists }),
+  }
+}
+
 beforeEach(() => {
+  mockFetch.mockReset()
+  mockFetch.mockResolvedValue(phoneCheckResponse(false))
   vi.stubGlobal("fetch", mockFetch)
   localStorage.clear()
 })
@@ -20,9 +32,8 @@ describe("RegistroPage", () => {
     renderWithProviders(<RegistroPage />)
     expect(screen.getByText("Crea tu programa de fidelidad")).toBeInTheDocument()
     expect(screen.getByLabelText("Nombre del negocio")).toBeInTheDocument()
-    expect(screen.getByLabelText("Email del administrador")).toBeInTheDocument()
-    expect(screen.getByLabelText("Password")).toBeInTheDocument()
-    expect(screen.getByLabelText("Confirmar password")).toBeInTheDocument()
+    expect(screen.getByText("Telefono del negocio")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText("5512345678")).toBeInTheDocument()
   })
 
   it("renders description field as optional", () => {
@@ -38,54 +49,45 @@ describe("RegistroPage", () => {
 
   it("has submit button", () => {
     renderWithProviders(<RegistroPage />)
-    expect(screen.getByRole("button", { name: "Crear cuenta" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Continuar" })).toBeInTheDocument()
   })
 
-  it("shows validation errors on empty submit", async () => {
-    const user = userEvent.setup()
+  it("disables submit until a phone number is verified", () => {
     renderWithProviders(<RegistroPage />)
-    await user.click(screen.getByRole("button", { name: "Crear cuenta" }))
-
-    await waitFor(() => {
-      expect(screen.getByText("El nombre es requerido")).toBeInTheDocument()
-    })
+    expect(screen.getByRole("button", { name: "Continuar" })).toBeDisabled()
   })
 
-  it("shows password mismatch error", async () => {
+  it("checks phone availability and enables submit when available", async () => {
     const user = userEvent.setup()
     renderWithProviders(<RegistroPage />)
 
     await user.type(screen.getByLabelText("Nombre del negocio"), "Test")
     await user.type(screen.getByPlaceholderText("5512345678"), "5512345678")
-    await user.type(screen.getByLabelText("Email del administrador"), "a@b.com")
-    await user.type(screen.getByLabelText("Password"), "password1")
-    await user.type(screen.getByLabelText("Confirmar password"), "password2")
-    await user.click(screen.getByRole("button", { name: "Crear cuenta" }))
 
     await waitFor(() => {
-      expect(screen.getByText("Las contraseñas no coinciden")).toBeInTheDocument()
+      expect(mockFetch).toHaveBeenCalled()
+    })
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Continuar" })).toBeEnabled()
     })
   })
 
-  it("shows password strength bar when typing", async () => {
+  it("warns and requires confirmation when phone already exists", async () => {
+    mockFetch.mockResolvedValue(phoneCheckResponse(true))
     const user = userEvent.setup()
     renderWithProviders(<RegistroPage />)
 
-    await user.type(screen.getByLabelText("Password"), "ab")
+    await user.type(screen.getByPlaceholderText("5512345678"), "5512345678")
 
     await waitFor(() => {
-      expect(screen.getByText("Muy debil")).toBeInTheDocument()
+      expect(screen.getByText("Este telefono ya esta registrado.")).toBeInTheDocument()
     })
-  })
+    // Aún bloqueado hasta marcar la casilla de confirmación.
+    expect(screen.getByRole("button", { name: "Continuar" })).toBeDisabled()
 
-  it("shows strong password indicator", async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<RegistroPage />)
-
-    await user.type(screen.getByLabelText("Password"), "MyStr0ng!Pass")
-
+    await user.click(screen.getByRole("checkbox"))
     await waitFor(() => {
-      expect(screen.getByText("Muy fuerte")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Continuar" })).toBeEnabled()
     })
   })
 })
