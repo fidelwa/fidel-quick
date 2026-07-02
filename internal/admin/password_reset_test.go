@@ -221,6 +221,61 @@ func TestResetPassword_ShortPassword(t *testing.T) {
 	assert.Equal(t, 400, appErr.HTTPStatus)
 }
 
+// TestResetPassword_RateLimited verifies the reset-password endpoint is rate
+// limited per client IP (10/h). The 11th attempt from the same IP is rejected
+// with 429, while a different IP still has its own budget (SV-1).
+func TestResetPassword_RateLimited(t *testing.T) {
+	repo := &mockRepo{
+		getResetTokenFn: func(tokenHash string) (*PasswordResetToken, error) {
+			return &PasswordResetToken{
+				ID: "t-1", AdminID: "a-1", TokenHash: tokenHash,
+				ExpiresAt: time.Now().Add(time.Hour),
+			}, nil
+		},
+	}
+	svc := resetSvc(repo, &stubSender{})
+
+	// 10 allowed per hour per IP; the 11th from the same IP must be rejected.
+	for i := 0; i < 10; i++ {
+		require.NoError(t, svc.ResetPassword("9.9.9.9", "tok", "newpassword123"))
+	}
+	err := svc.ResetPassword("9.9.9.9", "tok", "newpassword123")
+	require.Error(t, err)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, 429, appErr.HTTPStatus)
+
+	// A different IP keeps its own independent budget.
+	require.NoError(t, svc.ResetPassword("8.8.8.8", "tok", "newpassword123"))
+}
+
+// TestResetPassword_AdminGoneNoConsume verifies that if the admin row is gone
+// (deleted/nonexistent) the repository reports an error and does NOT mark the
+// token used — the whole transaction rolls back (LG-1). Exercised at the
+// service level: ConsumePasswordReset surfaces the NotFound.
+func TestResetPassword_AdminGoneNoConsume(t *testing.T) {
+	repo := &mockRepo{
+		getResetTokenFn: func(tokenHash string) (*PasswordResetToken, error) {
+			return &PasswordResetToken{
+				ID: "t-1", AdminID: "ghost", TokenHash: tokenHash,
+				ExpiresAt: time.Now().Add(time.Hour),
+			}, nil
+		},
+		consumeResetFn: func(_, adminID, _ string) error {
+			// Emulates the repo detecting 0 rows affected on the admins UPDATE.
+			assert.Equal(t, "ghost", adminID)
+			return apperror.NotFound("admin not found", nil)
+		},
+	}
+	svc := resetSvc(repo, &stubSender{})
+
+	err := svc.ResetPassword("1.2.3.4", "tok", "newpassword123")
+	require.Error(t, err)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, 404, appErr.HTTPStatus)
+}
+
 // --- API handlers ---
 
 func setupResetRouter(repo Repository, sender email.Sender) *gin.Engine {

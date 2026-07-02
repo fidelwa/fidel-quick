@@ -82,6 +82,9 @@ export function ResetPasswordPage() {
           ? "El enlace es inválido o ya expiró. Solicita uno nuevo."
           : msg
       )
+    } finally {
+      // Re-enable the button in every case, including success, so it isn't
+      // left disabled if navigation is delayed.
       setLoading(false)
     }
   }
