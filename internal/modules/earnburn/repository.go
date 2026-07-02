@@ -17,6 +17,13 @@ import (
 // via the partial unique index idx_transactions_earnburn_receipt_hash.
 var ErrDuplicateReceipt = errors.New("ticket ya registrado")
 
+// ErrRewardOutOfStock (FID-38) is returned when a reward has a finite stock_total
+// and it is already fully redeemed (redeemed_count >= stock_total). The atomic
+// stock decrement inside BurnPointsTx affects 0 rows in that case, and the whole
+// burn transaction is rolled back so no points are spent and no redemption is
+// created.
+var ErrRewardOutOfStock = errors.New("premio agotado")
+
 // isUniqueViolation reports whether err is a Postgres unique_violation (23505).
 func isUniqueViolation(err error) bool {
 	var pqErr *pq.Error
@@ -442,10 +449,13 @@ func (r *PostgresRepository) GetClientPhone(ctx context.Context, clientID string
 }
 
 func (r *PostgresRepository) ListRewards(ctx context.Context, customerID, customerSisfiID string, maxPoints int) ([]Reward, error) {
+	// FID-38: excluir premios cuyo stock finito ya se agotó.
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, customer_id, customer_sisfi_id, name, COALESCE(description, ''), points_cost, active
+		SELECT id, customer_id, customer_sisfi_id, name, COALESCE(description, ''), points_cost, active,
+		       stock_total, redeemed_count, limit_per_client
 		FROM rewards_earnburn
 		WHERE customer_id = $1 AND customer_sisfi_id = $2 AND active = true AND points_cost <= $3
+		  AND (stock_total IS NULL OR redeemed_count < stock_total)
 		ORDER BY points_cost ASC
 	`, customerID, customerSisfiID, maxPoints)
 	if err != nil {
@@ -456,7 +466,7 @@ func (r *PostgresRepository) ListRewards(ctx context.Context, customerID, custom
 	var rewards []Reward
 	for rows.Next() {
 		var rw Reward
-		if err := rows.Scan(&rw.ID, &rw.CustomerID, &rw.CustomerSisfiID, &rw.Name, &rw.Description, &rw.PointsCost, &rw.Active); err != nil {
+		if err := scanReward(rows, &rw); err != nil {
 			return nil, fmt.Errorf("scan reward: %w", err)
 		}
 		rewards = append(rewards, rw)
@@ -464,33 +474,71 @@ func (r *PostgresRepository) ListRewards(ctx context.Context, customerID, custom
 	return rewards, nil
 }
 
+// rewardScanner abstracts *sql.Row and *sql.Rows for scanReward.
+type rewardScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+// scanReward scans the canonical reward column order (incl. FID-38 stock columns)
+// into rw, mapping SQL NULLs to nil pointers.
+func scanReward(s rewardScanner, rw *Reward) error {
+	var desc sql.NullString
+	var stockTotal, limitPerClient sql.NullInt64
+	if err := s.Scan(&rw.ID, &rw.CustomerID, &rw.CustomerSisfiID, &rw.Name, &desc,
+		&rw.PointsCost, &rw.Active, &stockTotal, &rw.RedeemedCount, &limitPerClient); err != nil {
+		return err
+	}
+	rw.Description = desc.String
+	if stockTotal.Valid {
+		v := int(stockTotal.Int64)
+		rw.StockTotal = &v
+	}
+	if limitPerClient.Valid {
+		v := int(limitPerClient.Int64)
+		rw.LimitPerClient = &v
+	}
+	return nil
+}
+
 func (r *PostgresRepository) GetReward(ctx context.Context, id string) (*Reward, error) {
 	var rw Reward
-	var desc sql.NullString
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, customer_id, customer_sisfi_id, name, description, points_cost, active FROM rewards_earnburn WHERE id = $1`, id,
-	).Scan(&rw.ID, &rw.CustomerID, &rw.CustomerSisfiID, &rw.Name, &desc, &rw.PointsCost, &rw.Active)
+	err := scanReward(r.db.QueryRowContext(ctx,
+		`SELECT id, customer_id, customer_sisfi_id, name, description, points_cost, active,
+		        stock_total, redeemed_count, limit_per_client
+		 FROM rewards_earnburn WHERE id = $1`, id,
+	), &rw)
 	if err != nil {
 		return nil, fmt.Errorf("get reward: %w", err)
 	}
-	rw.Description = desc.String
 	return &rw, nil
 }
 
 func (r *PostgresRepository) CreateReward(ctx context.Context, rw *Reward) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO rewards_earnburn (id, customer_id, customer_sisfi_id, name, description, points_cost, active)
-		VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7)
-	`, rw.ID, rw.CustomerID, rw.CustomerSisfiID, rw.Name, rw.Description, rw.PointsCost, rw.Active)
+		INSERT INTO rewards_earnburn (id, customer_id, customer_sisfi_id, name, description, points_cost, active, stock_total, limit_per_client)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7, $8, $9)
+	`, rw.ID, rw.CustomerID, rw.CustomerSisfiID, rw.Name, rw.Description, rw.PointsCost, rw.Active,
+		nullableInt(rw.StockTotal), nullableInt(rw.LimitPerClient))
 	return err
 }
 
 func (r *PostgresRepository) UpdateReward(ctx context.Context, rw *Reward) error {
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE rewards_earnburn SET name = $2, description = NULLIF($3, ''), points_cost = $4, active = $5, updated_at = NOW()
+		UPDATE rewards_earnburn SET name = $2, description = NULLIF($3, ''), points_cost = $4, active = $5,
+		       stock_total = $6, limit_per_client = $7, updated_at = NOW()
 		WHERE id = $1
-	`, rw.ID, rw.Name, rw.Description, rw.PointsCost, rw.Active)
+	`, rw.ID, rw.Name, rw.Description, rw.PointsCost, rw.Active,
+		nullableInt(rw.StockTotal), nullableInt(rw.LimitPerClient))
 	return err
+}
+
+// nullableInt returns nil (SQL NULL) for a nil pointer so INTEGER columns stay
+// NULL (= "sin límite" / stock ilimitado) rather than storing 0.
+func nullableInt(p *int) interface{} {
+	if p == nil {
+		return nil
+	}
+	return *p
 }
 
 func (r *PostgresRepository) CreateRedemption(ctx context.Context, rd *Redemption) error {
@@ -620,11 +668,32 @@ func nullableJSON(b []byte) interface{} {
 }
 
 // BurnPointsTx atomically deducts points and creates a redemption record.
+//
+// FID-38: si el premio tiene stock finito, el decremento del stock se hace de
+// forma ATÓMICA dentro de la MISMA transacción (UPDATE ... WHERE stock_total IS
+// NULL OR redeemed_count < stock_total). Si afecta 0 filas el premio está agotado:
+// se devuelve ErrRewardOutOfStock y la transacción entera (balance + tx + canje)
+// se revierte. El WHERE condicionado bajo el lock de fila de Postgres garantiza
+// que dos clientes peleando por la última unidad no puedan ganar ambos.
 func (r *PostgresRepository) BurnPointsTx(ctx context.Context, t *Transaction, rd *Redemption) error {
 	return r.WithTx(ctx, func(tx *sql.Tx) error {
+		// Reserva atómica de stock (antes de tocar el balance). Un premio con
+		// stock_total NULL es ilimitado y siempre pasa.
+		res, err := tx.ExecContext(ctx, `
+			UPDATE rewards_earnburn
+			SET redeemed_count = redeemed_count + 1, updated_at = NOW()
+			WHERE id = $1 AND (stock_total IS NULL OR redeemed_count < stock_total)
+		`, rd.RewardID)
+		if err != nil {
+			return fmt.Errorf("reserve reward stock: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrRewardOutOfStock
+		}
+
 		// Deduct balance
 		var newBalance int
-		err := tx.QueryRowContext(ctx, `
+		err = tx.QueryRowContext(ctx, `
 			UPDATE balances_earnburn
 			SET balance = balance + $3, updated_at = NOW()
 			WHERE client_id = $1 AND customer_sisfi_id = $2 AND balance >= $4
@@ -756,7 +825,9 @@ func (r *PostgresRepository) ListCollaborators(ctx context.Context, customerID s
 
 func (r *PostgresRepository) ListAllRewards(ctx context.Context, customerSisfiID string) ([]Reward, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, customer_id, customer_sisfi_id, name, COALESCE(description, ''), points_cost, active FROM rewards_earnburn
+		`SELECT id, customer_id, customer_sisfi_id, name, COALESCE(description, ''), points_cost, active,
+		        stock_total, redeemed_count, limit_per_client
+		 FROM rewards_earnburn
 		 WHERE customer_sisfi_id = $1 ORDER BY points_cost`, customerSisfiID)
 	if err != nil {
 		return nil, fmt.Errorf("list all rewards: %w", err)
@@ -766,7 +837,7 @@ func (r *PostgresRepository) ListAllRewards(ctx context.Context, customerSisfiID
 	var rewards []Reward
 	for rows.Next() {
 		var rw Reward
-		if err := rows.Scan(&rw.ID, &rw.CustomerID, &rw.CustomerSisfiID, &rw.Name, &rw.Description, &rw.PointsCost, &rw.Active); err != nil {
+		if err := scanReward(rows, &rw); err != nil {
 			return nil, fmt.Errorf("scan reward: %w", err)
 		}
 		rewards = append(rewards, rw)
@@ -784,19 +855,29 @@ func (r *PostgresRepository) CreateRewardAdmin(ctx context.Context, customerSisf
 	}
 
 	return r.db.QueryRowContext(ctx,
-		`INSERT INTO rewards_earnburn (customer_id, customer_sisfi_id, name, description, points_cost)
-		 VALUES ($1, $2, $3, NULLIF($4, ''), $5) RETURNING id`,
+		`INSERT INTO rewards_earnburn (customer_id, customer_sisfi_id, name, description, points_cost, stock_total, limit_per_client)
+		 VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7) RETURNING id`,
 		customerID, customerSisfiID, rw.Name, rw.Description, rw.PointsCost,
+		nullableInt(rw.StockTotal), nullableInt(rw.LimitPerClient),
 	).Scan(&rw.ID)
 }
 
+// UpdateRewardAdmin updates the admin-editable reward fields.
+//
+// FID-38 (full-replace en stock, como los límites de FID-34/36/37): stock_total y
+// limit_per_client se asignan SIEMPRE con el valor recibido; un puntero nil escribe
+// NULL (= ilimitado / sin límite). redeemed_count NUNCA se toca aquí — solo lo
+// mueve el burn atómico— para no perder el conteo real de canjes.
 func (r *PostgresRepository) UpdateRewardAdmin(ctx context.Context, rw *Reward) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE rewards_earnburn SET name = COALESCE(NULLIF($2, ''), name),
 		 description = COALESCE(NULLIF($3, ''), description),
 		 points_cost = CASE WHEN $4 > 0 THEN $4 ELSE points_cost END,
-		 active = COALESCE($5, active), updated_at = NOW() WHERE id = $1`,
+		 active = COALESCE($5, active),
+		 stock_total = $6, limit_per_client = $7,
+		 updated_at = NOW() WHERE id = $1`,
 		rw.ID, rw.Name, rw.Description, rw.PointsCost, rw.Active,
+		nullableInt(rw.StockTotal), nullableInt(rw.LimitPerClient),
 	)
 	return err
 }

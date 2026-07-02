@@ -207,6 +207,11 @@ func (s *Service) RequestRedemption(ctx context.Context, req RedemptionReq) (*Re
 	}
 
 	if err := s.repo.BurnPointsTx(ctx, tx, rd); err != nil {
+		// FID-38: premio agotado. El burn se revirtió completo (no se gastaron
+		// puntos ni se creó canje). Error tipado para respuesta clara al cliente.
+		if errors.Is(err, ErrRewardOutOfStock) {
+			return nil, "", apperror.Conflict("premio agotado", err)
+		}
 		return nil, "", fmt.Errorf("burn points: %w", err)
 	}
 

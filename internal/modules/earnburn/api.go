@@ -126,6 +126,9 @@ func (h *APIHandler) createReward(c *gin.Context) {
 		Name        string `json:"name" binding:"required"`
 		Description string `json:"description"`
 		PointsCost  int    `json:"points_cost" binding:"required"`
+		// FID-38: stock_total nil/omitido = ilimitado.
+		StockTotal     *int `json:"stock_total"`
+		LimitPerClient *int `json:"limit_per_client"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.BadRequest("datos invalidos", err))
@@ -133,9 +136,11 @@ func (h *APIHandler) createReward(c *gin.Context) {
 	}
 
 	rw := &Reward{
-		Name:        req.Name,
-		Description: req.Description,
-		PointsCost:  req.PointsCost,
+		Name:           req.Name,
+		Description:    req.Description,
+		PointsCost:     req.PointsCost,
+		StockTotal:     req.StockTotal,
+		LimitPerClient: req.LimitPerClient,
 	}
 	if err := h.service.CreateRewardAdmin(c.Request.Context(), customerSisfiID, rw); err != nil {
 		c.Error(err)
@@ -162,6 +167,9 @@ func (h *APIHandler) updateReward(c *gin.Context) {
 		Description string `json:"description"`
 		PointsCost  int    `json:"points_cost"`
 		Active      *bool  `json:"active"`
+		// FID-38: full-replace — nil/omitido escribe NULL (stock ilimitado).
+		StockTotal     *int `json:"stock_total"`
+		LimitPerClient *int `json:"limit_per_client"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.BadRequest("datos invalidos", err))
@@ -173,11 +181,13 @@ func (h *APIHandler) updateReward(c *gin.Context) {
 		active = *req.Active
 	}
 	rw := &Reward{
-		ID:          c.Param("reward_id"),
-		Name:        req.Name,
-		Description: req.Description,
-		PointsCost:  req.PointsCost,
-		Active:      active,
+		ID:             c.Param("reward_id"),
+		Name:           req.Name,
+		Description:    req.Description,
+		PointsCost:     req.PointsCost,
+		Active:         active,
+		StockTotal:     req.StockTotal,
+		LimitPerClient: req.LimitPerClient,
 	}
 	if err := h.service.UpdateRewardAdmin(c.Request.Context(), rw); err != nil {
 		c.Error(err)

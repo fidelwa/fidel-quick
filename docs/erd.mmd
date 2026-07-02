@@ -157,6 +157,9 @@ erDiagram
         text description
         int points_cost
         boolean active
+        int stock_total "NULL = ilimitado (FID-38)"
+        int redeemed_count "default 0 (FID-38)"
+        int limit_per_client "NULL = sin límite (FID-38)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -216,6 +219,9 @@ erDiagram
         text description
         decimal cost "DECIMAL(12,2)"
         boolean active
+        int stock_total "NULL = ilimitado (FID-38)"
+        int redeemed_count "default 0 (FID-38)"
+        int limit_per_client "NULL = sin límite (FID-38)"
         timestamptz created_at
         timestamptz updated_at
     }
