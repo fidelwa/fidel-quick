@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
@@ -17,8 +18,9 @@ type Repository interface {
 	CreateCustomer(name, slug, phone, description string) (customerID string, err error)
 	SlugExists(slug string) (bool, error)
 	CustomerPhoneExists(phone string) (bool, error)
-	LinkGoogle(adminID, sub, email string) error
+	LinkGoogle(adminID string, profile *GoogleProfile) error
 	UnlinkGoogle(adminID string) error
+	UpdateGoogleProfile(adminID string, profile *GoogleProfile) error
 
 	// Password reset flow (FID-16).
 	CreatePasswordResetToken(adminID, tokenHash string, expiresAt time.Time) error
@@ -39,22 +41,26 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-const adminColumns = `id, customer_id, email, password_hash, google_sub, google_email, active, created_at, updated_at`
+const adminColumns = `id, customer_id, email, password_hash,
+	google_sub, google_email, full_name, avatar_url, locale, hosted_domain,
+	active, created_at, updated_at`
 
 func scanAdmin(row interface{ Scan(...any) error }) (*Admin, error) {
 	var a Admin
-	var sub, gemail sql.NullString
-	if err := row.Scan(&a.ID, &a.CustomerID, &a.Email, &a.PasswordHash, &sub, &gemail, &a.Active, &a.CreatedAt, &a.UpdatedAt); err != nil {
+	var sub, gemail, fullName, avatarURL, locale, hd sql.NullString
+	if err := row.Scan(
+		&a.ID, &a.CustomerID, &a.Email, &a.PasswordHash,
+		&sub, &gemail, &fullName, &avatarURL, &locale, &hd,
+		&a.Active, &a.CreatedAt, &a.UpdatedAt,
+	); err != nil {
 		return nil, err
 	}
-	if sub.Valid {
-		v := sub.String
-		a.GoogleSub = &v
-	}
-	if gemail.Valid {
-		v := gemail.String
-		a.GoogleEmail = &v
-	}
+	a.GoogleSub = nullableToPtr(sub)
+	a.GoogleEmail = nullableToPtr(gemail)
+	a.FullName = nullableToPtr(fullName)
+	a.AvatarURL = nullableToPtr(avatarURL)
+	a.Locale = nullableToPtr(locale)
+	a.HostedDomain = nullableToPtr(hd)
 	return &a, nil
 }
 
@@ -105,11 +111,14 @@ func (r *PostgresRepository) GetByGoogleSub(sub string) (*Admin, error) {
 
 func (r *PostgresRepository) Create(admin *Admin) error {
 	err := r.db.QueryRow(
-		`INSERT INTO admins (customer_id, email, password_hash, google_sub, google_email)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO admins (customer_id, email, password_hash,
+			google_sub, google_email, full_name, avatar_url, locale, hosted_domain)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 RETURNING id, created_at, updated_at`,
 		admin.CustomerID, admin.Email, admin.PasswordHash,
 		nullableString(admin.GoogleSub), nullableString(admin.GoogleEmail),
+		nullableString(admin.FullName), nullableString(admin.AvatarURL),
+		nullableString(admin.Locale), nullableString(admin.HostedDomain),
 	).Scan(&admin.ID, &admin.CreatedAt, &admin.UpdatedAt)
 
 	if err != nil {
@@ -150,11 +159,28 @@ func (r *PostgresRepository) CustomerPhoneExists(phone string) (bool, error) {
 	return exists, err
 }
 
-func (r *PostgresRepository) LinkGoogle(adminID, sub, email string) error {
+// LinkGoogle stores the full Google profile (sub + email + name + picture + ...)
+// against the admin. Used both for first-time linking and for refreshing the
+// profile on subsequent logins (Google may rotate picture URLs / change name).
+//
+// full_name/avatar_url/locale are preserved (COALESCE) when the new value is
+// empty — we don't want a scope-less token to wipe cached profile data.
+// hosted_domain, in contrast, is assigned directly so it always mirrors the
+// current account: an empty hd (personal account) clears any stale domain.
+func (r *PostgresRepository) LinkGoogle(adminID string, profile *GoogleProfile) error {
 	res, err := r.db.Exec(
-		`UPDATE admins SET google_sub = $1, google_email = $2, updated_at = NOW()
-		 WHERE id = $3`,
-		sub, email, adminID,
+		`UPDATE admins SET
+			google_sub = $1,
+			google_email = $2,
+			full_name = COALESCE(NULLIF($3, ''), full_name),
+			avatar_url = COALESCE(NULLIF($4, ''), avatar_url),
+			locale = COALESCE(NULLIF($5, ''), locale),
+			hosted_domain = $6,
+			updated_at = NOW()
+		 WHERE id = $7`,
+		profile.Sub, profile.Email,
+		profile.FullName, profile.Picture, profile.Locale, nullIfEmpty(profile.HostedDomain),
+		adminID,
 	)
 	if err != nil {
 		if isDuplicateKeyError(err) {
@@ -169,9 +195,39 @@ func (r *PostgresRepository) LinkGoogle(adminID, sub, email string) error {
 	return nil
 }
 
-func (r *PostgresRepository) UnlinkGoogle(adminID string) error {
+// UpdateGoogleProfile refreshes the cached Google profile fields without
+// touching google_sub or google_email. Called on every successful Google login
+// to keep the avatar / name fresh. full_name/avatar_url/locale are preserved
+// when empty; hosted_domain is set directly so it tracks the current account
+// (an empty hd clears a previously stored domain).
+func (r *PostgresRepository) UpdateGoogleProfile(adminID string, profile *GoogleProfile) error {
 	res, err := r.db.Exec(
-		`UPDATE admins SET google_sub = NULL, google_email = NULL, updated_at = NOW()
+		`UPDATE admins SET
+			full_name = COALESCE(NULLIF($1, ''), full_name),
+			avatar_url = COALESCE(NULLIF($2, ''), avatar_url),
+			locale = COALESCE(NULLIF($3, ''), locale),
+			hosted_domain = $4,
+			updated_at = NOW()
+		 WHERE id = $5`,
+		profile.FullName, profile.Picture, profile.Locale, nullIfEmpty(profile.HostedDomain),
+		adminID,
+	)
+	if err != nil {
+		return apperror.Internal("failed to update google profile", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return apperror.NotFound("admin not found", nil)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) UnlinkGoogle(adminID string) error {
+	// Limpiamos solo identificadores de vinculación; full_name/avatar_url/locale
+	// quedan como datos del usuario (puede borrarlos manualmente desde el panel
+	// si lo agregamos como feature).
+	res, err := r.db.Exec(
+		`UPDATE admins SET google_sub = NULL, google_email = NULL, hosted_domain = NULL, updated_at = NOW()
 		 WHERE id = $1`,
 		adminID,
 	)
@@ -183,6 +239,16 @@ func (r *PostgresRepository) UnlinkGoogle(adminID string) error {
 		return apperror.NotFound("admin not found", nil)
 	}
 	return nil
+}
+
+// nullIfEmpty maps an empty string to a SQL NULL and a non-empty string to
+// itself. Used for columns that must reflect the current account state (so an
+// empty value clears the column) rather than being preserved via COALESCE.
+func nullIfEmpty(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // --- Password reset (FID-16) ---
@@ -230,11 +296,22 @@ func (r *PostgresRepository) ConsumePasswordReset(tokenID, adminID, newPasswordH
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if _, err := tx.Exec(
+	res, err := tx.Exec(
 		`UPDATE admins SET password_hash = $1, updated_at = NOW() WHERE id = $2`,
 		newPasswordHash, adminID,
-	); err != nil {
+	)
+	if err != nil {
 		return apperror.Internal("failed to update password", err)
+	}
+	// If no admin row was updated (deleted/nonexistent), abort so we neither
+	// mark the token used nor report success. The deferred Rollback undoes
+	// everything in this tx.
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return apperror.Internal("failed to read update result", err)
+	}
+	if rows == 0 {
+		return apperror.NotFound("admin not found", nil)
 	}
 
 	if _, err := tx.Exec(
@@ -267,20 +344,15 @@ func nullableString(s *string) interface{} {
 	return *s
 }
 
-func isDuplicateKeyError(err error) bool {
-	return err != nil && (errors.Is(err, sql.ErrNoRows) == false) &&
-		(len(err.Error()) > 0 && contains(err.Error(), "duplicate key"))
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+func nullableToPtr(s sql.NullString) *string {
+	if !s.Valid {
+		return nil
 	}
-	return false
+	v := s.String
+	return &v
+}
+
+func isDuplicateKeyError(err error) bool {
+	return err != nil && !errors.Is(err, sql.ErrNoRows) &&
+		strings.Contains(err.Error(), "duplicate key")
 }
