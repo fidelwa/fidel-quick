@@ -43,6 +43,7 @@ type mockRepo struct {
 	listClientsFn                  func(ctx context.Context, customerID string) ([]Client, error)
 	updateProgramFn                func(ctx context.Context, p *EarnBurnProgram, setActive *bool) error
 	expirePointsFn                 func(ctx context.Context, clientID, customerSisfiID string, expiryDays int) (int, error)
+	getMetricsRawFn                func(ctx context.Context, customerID string) (MetricsRaw, error)
 }
 
 func (m *mockRepo) GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error) {
@@ -224,6 +225,13 @@ func (m *mockRepo) ListClients(ctx context.Context, customerID string) ([]Client
 }
 
 func (m *mockRepo) RegisterClient(ctx context.Context, customerID, phone string) error { return nil }
+
+func (m *mockRepo) GetMetricsRaw(ctx context.Context, customerID string) (MetricsRaw, error) {
+	if m.getMetricsRawFn != nil {
+		return m.getMetricsRawFn(ctx, customerID)
+	}
+	return MetricsRaw{}, nil
+}
 
 func (m *mockRepo) AddPointsTx(ctx context.Context, t *Transaction) (int, error) {
 	if m.addPointsTxFn != nil {
