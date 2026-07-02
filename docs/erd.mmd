@@ -60,6 +60,7 @@ erDiagram
         uuid customer_sisfi_id FK_UK
         int card_slots "DEFAULT 10, CHECK > 0"
         uuid reward_on_complete "nullable"
+        int card_expiry_days "nullable, CHECK > 0; null = sin expiración"
         timestamptz created_at
         timestamptz updated_at
     }

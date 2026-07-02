@@ -22,6 +22,7 @@ type Repository interface {
 	CountStamps(ctx context.Context, cardID string) (int, error)
 	AddStamp(ctx context.Context, stamp *Stamp) error
 	CompleteCard(ctx context.Context, cardID string) error
+	CancelCard(ctx context.Context, cardID string) error
 	MarkRedeemed(ctx context.Context, cardID string) error
 
 	// LastStampByCollaborator returns the most recent stamp by this collaborator
@@ -48,44 +49,59 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 func (r *PostgresRepository) GetConfig(ctx context.Context, customerID string) (*Config, error) {
 	var c Config
 	var rewardID sql.NullString
+	var expiryDays sql.NullInt64
 	err := r.db.QueryRowContext(ctx, `
-		SELECT cs.id, cs.customer_id, cs.name, pc.card_slots, pc.reward_on_complete, cs.active
+		SELECT cs.id, cs.customer_id, cs.name, pc.card_slots, pc.reward_on_complete, pc.card_expiry_days, cs.active
 		FROM customer_sisfi cs
 		JOIN pushcard_config pc ON pc.customer_sisfi_id = cs.id
 		WHERE cs.customer_id = $1 AND cs.sisfi_id = 'pushcard' AND cs.active = true
-	`, customerID).Scan(&c.CustomerSisfiID, &c.CustomerID, &c.Name, &c.CardSlots, &rewardID, &c.Active)
+	`, customerID).Scan(&c.CustomerSisfiID, &c.CustomerID, &c.Name, &c.CardSlots, &rewardID, &expiryDays, &c.Active)
 	if err != nil {
 		return nil, fmt.Errorf("get pushcard config: %w", err)
 	}
 	c.RewardOnComplete = rewardID.String
+	if expiryDays.Valid {
+		d := int(expiryDays.Int64)
+		c.CardExpiryDays = &d
+	}
 	return &c, nil
 }
 
 func (r *PostgresRepository) GetConfigByID(ctx context.Context, customerSisfiID string) (*Config, error) {
 	var c Config
 	var rewardID sql.NullString
+	var expiryDays sql.NullInt64
 	err := r.db.QueryRowContext(ctx, `
-		SELECT cs.id, cs.customer_id, cs.name, pc.card_slots, pc.reward_on_complete, cs.active
+		SELECT cs.id, cs.customer_id, cs.name, pc.card_slots, pc.reward_on_complete, pc.card_expiry_days, cs.active
 		FROM customer_sisfi cs
 		JOIN pushcard_config pc ON pc.customer_sisfi_id = cs.id
 		WHERE cs.id = $1
-	`, customerSisfiID).Scan(&c.CustomerSisfiID, &c.CustomerID, &c.Name, &c.CardSlots, &rewardID, &c.Active)
+	`, customerSisfiID).Scan(&c.CustomerSisfiID, &c.CustomerID, &c.Name, &c.CardSlots, &rewardID, &expiryDays, &c.Active)
 	if err != nil {
 		return nil, fmt.Errorf("get pushcard config by id: %w", err)
 	}
 	c.RewardOnComplete = rewardID.String
+	if expiryDays.Valid {
+		d := int(expiryDays.Int64)
+		c.CardExpiryDays = &d
+	}
 	return &c, nil
 }
 
 func (r *PostgresRepository) UpsertConfig(ctx context.Context, cfg *Config) error {
+	var expiryDays sql.NullInt64
+	if cfg.CardExpiryDays != nil {
+		expiryDays = sql.NullInt64{Int64: int64(*cfg.CardExpiryDays), Valid: true}
+	}
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO pushcard_config (customer_sisfi_id, card_slots, reward_on_complete)
-		VALUES ($1, $2, NULLIF($3, '')::uuid)
+		INSERT INTO pushcard_config (customer_sisfi_id, card_slots, reward_on_complete, card_expiry_days)
+		VALUES ($1, $2, NULLIF($3, '')::uuid, $4)
 		ON CONFLICT (customer_sisfi_id) DO UPDATE
 		SET card_slots = EXCLUDED.card_slots,
 		    reward_on_complete = EXCLUDED.reward_on_complete,
+		    card_expiry_days = EXCLUDED.card_expiry_days,
 		    updated_at = NOW()
-	`, cfg.CustomerSisfiID, cfg.CardSlots, cfg.RewardOnComplete)
+	`, cfg.CustomerSisfiID, cfg.CardSlots, cfg.RewardOnComplete, expiryDays)
 	if err != nil {
 		return fmt.Errorf("upsert pushcard config: %w", err)
 	}
@@ -173,6 +189,18 @@ func (r *PostgresRepository) CompleteCard(ctx context.Context, cardID string) er
 	`, cardID)
 	if err != nil {
 		return fmt.Errorf("complete card: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) CancelCard(ctx context.Context, cardID string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE pushcard_cards
+		SET status = 'cancelled', updated_at = NOW()
+		WHERE id = $1 AND status = 'open'
+	`, cardID)
+	if err != nil {
+		return fmt.Errorf("cancel card: %w", err)
 	}
 	return nil
 }
