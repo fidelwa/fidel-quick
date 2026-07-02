@@ -48,6 +48,9 @@ export function StepProgram({
   const [pushcardSlots, setPushcardSlots] = useState(
     pushcardDraft ? String(pushcardDraft.card_slots) : "10"
   )
+  const [pushcardReward, setPushcardReward] = useState(
+    pushcardDraft?.reward_on_complete ?? ""
+  )
 
   const handleNext = () => {
     if (!earnSelected && !cashbackSelected && !pushcardSelected) {
@@ -95,7 +98,11 @@ export function StepProgram({
         toast.error("La tarjeta debe tener entre 2 y 50 sellos")
         return
       }
-      onPushcardChange({ name: pushcardName.trim(), card_slots: slots })
+      onPushcardChange({
+        name: pushcardName.trim(),
+        card_slots: slots,
+        reward_on_complete: pushcardReward.trim() || undefined,
+      })
     } else {
       onPushcardChange(null)
     }
@@ -287,9 +294,19 @@ export function StepProgram({
                   onChange={(e) => setPushcardSlots(e.target.value)}
                 />
               </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="pushcard-reward">Recompensa al completar</Label>
+                <Input
+                  id="pushcard-reward"
+                  placeholder="Ej. Café gratis"
+                  value={pushcardReward}
+                  onChange={(e) => setPushcardReward(e.target.value)}
+                />
+              </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Configura la recompensa al completar la tarjeta luego desde el panel de pushcard.
+              Lo que el cliente recibe al llenar la tarjeta. Podés dejarlo vacío y
+              configurarlo luego desde el panel de pushcard.
             </p>
           </div>
         </div>

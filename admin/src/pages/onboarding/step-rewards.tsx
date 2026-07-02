@@ -225,9 +225,22 @@ export function StepRewards({
       {/* Pushcard solo: no hay rewards en este step */}
       {!earnBurnDraft && !cashbackDraft && pushcardDraft && (
         <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-          Tu programa de tarjeta de sellos no necesita recompensas en este paso.
-          Configura la recompensa al completar la tarjeta luego desde
-          <span className="mx-1 font-medium text-foreground">/admin/pushcard</span>.
+          {pushcardDraft.reward_on_complete ? (
+            <>
+              Tu tarjeta de sellos entrega
+              <span className="mx-1 font-medium text-foreground">
+                {pushcardDraft.reward_on_complete}
+              </span>
+              al completarse. Podés ajustarla luego desde
+              <span className="mx-1 font-medium text-foreground">/admin/pushcard</span>.
+            </>
+          ) : (
+            <>
+              Tu programa de tarjeta de sellos no necesita recompensas en este paso.
+              Configura la recompensa al completar la tarjeta luego desde
+              <span className="mx-1 font-medium text-foreground">/admin/pushcard</span>.
+            </>
+          )}
         </div>
       )}
 

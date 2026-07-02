@@ -131,7 +131,10 @@ async function batchCreateEntities(args: {
       sisfi_id: "pushcard",
       name: pushcardDraft.name,
     })
-    await upsertPushcardConfig(cs.id, { card_slots: pushcardDraft.card_slots })
+    await upsertPushcardConfig(cs.id, {
+      card_slots: pushcardDraft.card_slots,
+      reward_on_complete: pushcardDraft.reward_on_complete,
+    })
   }
 
   if (earnProgramId) {

@@ -24,6 +24,10 @@ export interface CashbackDraft {
 export interface PushcardDraft {
   name: string
   card_slots: number
+  // Descripción libre de la recompensa al completar la tarjeta (ej. "Café
+  // gratis"). Se asigna como reward_on_complete de la pushcard_config al crear
+  // la cuenta. Opcional: si queda vacío, se puede configurar luego en /pushcard.
+  reward_on_complete?: string
 }
 
 export interface RewardDraft {
@@ -75,14 +79,42 @@ const initialState: OnboardingState = {
 
 const STORAGE_KEY = "fidel_onboarding_draft"
 
+// TTL del borrador cacheado. Pasado este lapso desde el último guardado, el
+// draft se considera vencido y se descarta al cargar — así un onboarding
+// abandonado hace meses no reaparece con datos rancios.
+const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 días
+
 type PersistedDraft = Omit<OnboardingState, "currentStep" | "direction">
+
+// Envoltura persistida: el draft + el timestamp de guardado para aplicar TTL.
+interface StoredDraft {
+  savedAt: number
+  draft: PersistedDraft
+}
 
 function loadDraft(): Partial<OnboardingState> {
   if (typeof window === "undefined") return {}
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return {}
-    return JSON.parse(raw) as Partial<PersistedDraft>
+    const parsed = JSON.parse(raw) as Partial<StoredDraft> & Partial<PersistedDraft>
+    // Formato nuevo con { savedAt, draft }.
+    if (parsed && typeof parsed === "object" && "savedAt" in parsed && "draft" in parsed) {
+      const stored = parsed as StoredDraft
+      if (Date.now() - stored.savedAt > DRAFT_TTL_MS) {
+        // Vencido: limpiamos y arrancamos de cero.
+        try {
+          localStorage.removeItem(STORAGE_KEY)
+        } catch {
+          // ignore
+        }
+        return {}
+      }
+      return stored.draft
+    }
+    // Formato viejo (draft plano, sin savedAt): lo aceptamos una vez; el
+    // próximo saveDraft lo migra al formato con timestamp.
+    return parsed as Partial<PersistedDraft>
   } catch {
     return {}
   }
@@ -90,17 +122,20 @@ function loadDraft(): Partial<OnboardingState> {
 
 function saveDraft(state: OnboardingState) {
   if (typeof window === "undefined") return
-  const draft: PersistedDraft = {
-    businessInfo: state.businessInfo,
-    earnBurnDraft: state.earnBurnDraft,
-    cashbackDraft: state.cashbackDraft,
-    pushcardDraft: state.pushcardDraft,
-    rewardDrafts: state.rewardDrafts,
-    cashbackRewardDrafts: state.cashbackRewardDrafts,
-    collaboratorDrafts: state.collaboratorDrafts,
+  const stored: StoredDraft = {
+    savedAt: Date.now(),
+    draft: {
+      businessInfo: state.businessInfo,
+      earnBurnDraft: state.earnBurnDraft,
+      cashbackDraft: state.cashbackDraft,
+      pushcardDraft: state.pushcardDraft,
+      rewardDrafts: state.rewardDrafts,
+      cashbackRewardDrafts: state.cashbackRewardDrafts,
+      collaboratorDrafts: state.collaboratorDrafts,
+    },
   }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(draft))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
   } catch {
     // localStorage puede fallar en modo privado o si está lleno —
     // silencioso; el wizard sigue funcionando solo perdiendo el resume.
