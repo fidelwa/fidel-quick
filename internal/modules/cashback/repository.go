@@ -3,9 +3,31 @@ package cashback
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/lib/pq"
 )
+
+// ErrDuplicateReceipt is returned when a receipt with the same canonical hash was
+// already registered for the same customer_sisfi (business + program). Detected
+// via the partial unique index idx_transactions_cashback_receipt_hash.
+var ErrDuplicateReceipt = errors.New("ticket ya registrado")
+
+// isUniqueViolation reports whether err is a Postgres unique_violation (23505).
+func isUniqueViolation(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "23505"
+}
+
+// nullableJSON returns nil (SQL NULL) for empty payloads so JSONB columns stay NULL.
+func nullableJSON(b []byte) interface{} {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
+}
 
 type Repository interface {
 	GetProgram(ctx context.Context, customerID string) (*CashbackProgram, error)
@@ -412,13 +434,23 @@ func (r *PostgresRepository) AddCashbackTx(ctx context.Context, t *CashbackTrans
 
 		t.BalanceAfter = newBalance
 
+		// receipt_hash is inserted as NULL when empty so the partial unique index
+		// only guards confidently-hashed tickets. A unique violation rolls back the
+		// whole tx (balance included), so a duplicate ticket never credits cashback.
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO transactions_cashback
-			(id, client_id, customer_sisfi_id, collaborator_id, type, amount, purchase_amount, balance_after, invoice_url, description, manual_entry, correctable_until)
-			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6::NUMERIC, $7::NUMERIC, $8::NUMERIC, NULLIF($9, ''), NULLIF($10, ''), $11, $12)
+			(id, client_id, customer_sisfi_id, collaborator_id, type, amount, purchase_amount, balance_after, invoice_url, description, manual_entry, correctable_until, receipt_data, receipt_hash, receipt_hash_fields, receipt_confident)
+			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6::NUMERIC, $7::NUMERIC, $8::NUMERIC, NULLIF($9, ''), NULLIF($10, ''), $11, $12, $13, NULLIF($14, ''), $15, $16)
 		`, t.ID, t.ClientID, t.CustomerSisfiID, t.CollaboratorID, t.Type, t.Amount, t.PurchaseAmount, t.BalanceAfter,
-			t.InvoiceURL, t.Description, t.ManualEntry, t.CorrectableUntil)
-		return err
+			t.InvoiceURL, t.Description, t.ManualEntry, t.CorrectableUntil,
+			nullableJSON(t.ReceiptData), t.ReceiptHash, pq.Array(t.ReceiptHashFields), t.ReceiptConfident)
+		if err != nil {
+			if isUniqueViolation(err) {
+				return ErrDuplicateReceipt
+			}
+			return err
+		}
+		return nil
 	})
 	return newBalance, err
 }

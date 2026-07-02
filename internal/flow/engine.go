@@ -2,12 +2,19 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
+	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
 )
+
+// ReceiptDataKey is the CollectedData key under which the flow engine stashes the
+// JSON-serialized invoice extract, so downstream command handlers can persist it
+// and compute the anti-fraud hash without re-analyzing the photo.
+const ReceiptDataKey = "receipt_json"
 
 // cmdLogAttrs returns slog attributes for a failed command, including full user
 // context and the collected flow data so that every error log is self-contained.
@@ -51,6 +58,8 @@ type PhotoProcessResult struct {
 	StorageURL string
 	Amount     float64
 	Currency   string
+	// Invoice is the full structured extract (may be nil for backward compat).
+	Invoice *ai.InvoiceResult
 }
 
 // FlowStore persists flow state. Satisfied by *StateStore (Redis).
@@ -127,6 +136,15 @@ func (e *Engine) processStep(ctx context.Context, user loyalty.UserContext, fs *
 			actualInput = result.StorageURL
 			fs.CollectedData["amount"] = fmt.Sprintf("%.2f", result.Amount)
 			fs.CollectedData["currency"] = result.Currency
+			// Stash the full extract so the command handler can persist it and
+			// compute the anti-fraud receipt hash.
+			if result.Invoice != nil {
+				if raw, err := json.Marshal(result.Invoice); err == nil {
+					fs.CollectedData[ReceiptDataKey] = string(raw)
+				} else {
+					e.log.Warn("marshal invoice for receipt tracking failed", "error", err)
+				}
+			}
 		} else {
 			actualInput = imageURL
 		}
