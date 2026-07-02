@@ -15,6 +15,9 @@ import type {
   PushcardConfig,
   PushcardCard,
   AdminSummary,
+  MeResponse,
+  FeatureFlag,
+  FeatureFlagUpdate,
   AuthResponse,
   OnboardingRegisterRequest,
   GoogleOnboardingRequest,
@@ -225,7 +228,17 @@ export const unlinkGoogle = () =>
     method: "DELETE",
   })
 
-export const getMe = () => request<AdminSummary>(`/auth/me`)
+export const getMe = () => request<MeResponse>(`/auth/me`)
+
+// Feature flags (admin — JWT authenticated)
+export const getFeatureFlags = () =>
+  request<FeatureFlag[]>(`/admin/flags`)
+
+export const updateFeatureFlag = (key: string, data: FeatureFlagUpdate) =>
+  request<FeatureFlag>(`/admin/flags/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  })
 
 // Onboarding
 export const getOnboarding = () =>

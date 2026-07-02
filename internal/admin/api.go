@@ -1,18 +1,35 @@
 package admin
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
 )
 
+// FlagResolver resolves the enabled feature flags for a customer. It is
+// implemented by *featureflags.Service; kept as a local interface so the admin
+// package does not import featureflags (avoids a hard dependency and eases
+// testing). A nil resolver simply omits flags from the /auth/me response.
+type FlagResolver interface {
+	EnabledFor(ctx context.Context, customerID string) (map[string]bool, error)
+}
+
 type APIHandler struct {
 	service *Service
+	flags   FlagResolver
 }
 
 func NewAPIHandler(service *Service) *APIHandler {
 	return &APIHandler{service: service}
+}
+
+// WithFlags attaches a feature-flag resolver so /auth/me includes the flags
+// active for the caller's customer (used for UI gating).
+func (h *APIHandler) WithFlags(fr FlagResolver) *APIHandler {
+	h.flags = fr
+	return h
 }
 
 // RegisterRoutes registers public auth endpoints (login, register, login/google).
@@ -183,7 +200,17 @@ func (h *APIHandler) Me(c *gin.Context) {
 		c.Error(toAppError(err)) //nolint:errcheck
 		return
 	}
-	c.JSON(http.StatusOK, adminToSummary(admin))
+
+	resp := MeResponse{AdminSummary: adminToSummary(admin)}
+	if h.flags != nil {
+		flags, err := h.flags.EnabledFor(c.Request.Context(), admin.CustomerID)
+		if err != nil {
+			// Flags are best-effort for UI gating; never fail /auth/me on them.
+			flags = map[string]bool{}
+		}
+		resp.Flags = flags
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func adminToSummary(a *Admin) AdminSummary {

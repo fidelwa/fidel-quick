@@ -178,6 +178,34 @@ export interface AdminSummary {
   google_email?: string | null
 }
 
+// MeResponse mirrors GET /api/v1/auth/me: the admin summary plus the feature
+// flags resolved for the caller's customer (map of flag key → enabled) for UI
+// gating. `flags` may be absent when no flag resolver is wired server-side.
+export interface MeResponse extends AdminSummary {
+  flags?: Record<string, boolean>
+}
+
+// FeatureFlag mirrors the admin feature-flag definition
+// (GET/PUT /api/v1/admin/flags).
+export interface FeatureFlag {
+  key: string
+  enabled_globally: boolean
+  customer_overrides: Record<string, boolean>
+  default_value: boolean
+  description?: string
+  created_at: string
+  updated_at: string
+}
+
+// FeatureFlagUpdate is the PUT /api/v1/admin/flags/:key body. Omitted fields
+// are left unchanged (upsert semantics).
+export interface FeatureFlagUpdate {
+  enabled_globally?: boolean
+  customer_overrides?: Record<string, boolean>
+  default_value?: boolean
+  description?: string
+}
+
 export interface AuthResponse {
   token: string
   admin: AdminSummary

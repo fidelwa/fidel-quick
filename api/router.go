@@ -16,6 +16,7 @@ import (
 	"github.com/theluisbolivar/fidel-quick/api/middleware"
 	"github.com/theluisbolivar/fidel-quick/internal/admin"
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
+	"github.com/theluisbolivar/fidel-quick/internal/featureflags"
 	"github.com/theluisbolivar/fidel-quick/internal/landing"
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
 	"github.com/theluisbolivar/fidel-quick/internal/onboarding"
@@ -36,6 +37,7 @@ func SetupRouter(
 	adminAPI *admin.APIHandler,
 	onboardingAPI *onboarding.APIHandler,
 	sisfiAPI *sisfi.APIHandler,
+	flagsAPI *featureflags.APIHandler,
 	database *sql.DB,
 	redisClient *redis.Client,
 	adminSPA fs.FS,
@@ -105,6 +107,9 @@ func SetupRouter(
 
 	// Sisfi routes (JWT-authenticated)
 	sisfiAPI.RegisterRoutes(v1)
+
+	// Feature flags admin routes (JWT-authenticated)
+	flagsAPI.RegisterRoutes(v1)
 
 	// Module REST routes (each module registers its own)
 	registry.RegisterAllRoutes(v1)

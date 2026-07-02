@@ -53,6 +53,15 @@ type AdminSummary struct {
 	HostedDomain *string `json:"hosted_domain,omitempty"`
 }
 
+// MeResponse is the payload of GET /api/v1/auth/me. It embeds AdminSummary so
+// its fields stay flat in the JSON, and adds the feature flags resolved for the
+// caller's customer (map of flag key → enabled) for UI gating. Flags is omitted
+// when no flag resolver is wired.
+type MeResponse struct {
+	AdminSummary
+	Flags map[string]bool `json:"flags,omitempty"`
+}
+
 type GoogleOnboardingRequest struct {
 	GoogleToken string `json:"google_token" binding:"required"`
 	Name        string `json:"name" binding:"required"`
