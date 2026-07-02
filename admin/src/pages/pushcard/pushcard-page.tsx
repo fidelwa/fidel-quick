@@ -181,9 +181,9 @@ export function PushcardPage() {
               name="reward_on_complete"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Reward al completar (UUID)</FormLabel>
+                  <FormLabel>Recompensa al completar</FormLabel>
                   <FormControl>
-                    <Input placeholder="opcional" {...field} />
+                    <Input placeholder="Ej. Café gratis (opcional)" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

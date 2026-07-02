@@ -106,7 +106,12 @@ func (m *Module) handleRedeem(ctx context.Context, cmd loyalty.Command) (*loyalt
 	}
 
 	// Either there's a completed card waiting or no card at all.
-	rewardName := cfg.Name
+	// Preferimos la recompensa configurada (reward_on_complete, texto libre
+	// definido en el wizard/panel); si no hay, caemos al nombre del programa.
+	rewardName := cfg.RewardOnComplete
+	if strings.TrimSpace(rewardName) == "" {
+		rewardName = cfg.Name
+	}
 	code, err := m.service.RequestRedemption(ctx,
 		cfg.CustomerSisfiID, cmd.UserContext.UserID, cmd.UserContext.CustomerID, rewardName)
 	if err != nil {
@@ -149,7 +154,11 @@ func (m *Module) handleAddStamp(ctx context.Context, cmd loyalty.Command) (*loya
 	visual := buildVisual(res.StampsCount, res.CardSlots)
 	msg := fmt.Sprintf("Sello sumado.\n%s\n%d / %d", visual, res.StampsCount, res.CardSlots)
 	if res.Completed {
-		msg += fmt.Sprintf("\n\n¡Tarjeta completada! Avisale al cliente para que canjee *%s*.", cfg.Name)
+		completedReward := cfg.RewardOnComplete
+		if strings.TrimSpace(completedReward) == "" {
+			completedReward = cfg.Name
+		}
+		msg += fmt.Sprintf("\n\n¡Tarjeta completada! Avisale al cliente para que canjee *%s*.", completedReward)
 	}
 	msg += "\n\n_Podés deshacer este sello en las próximas 2 horas._"
 	return &loyalty.CommandResult{Message: msg}, nil

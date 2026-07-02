@@ -93,9 +93,11 @@ func (r *PostgresRepository) UpsertConfig(ctx context.Context, cfg *Config) erro
 	if cfg.CardExpiryDays != nil {
 		expiryDays = sql.NullInt64{Int64: int64(*cfg.CardExpiryDays), Valid: true}
 	}
+	// reward_on_complete es TEXT (descripción libre, ej. "Café gratis").
+	// NULLIF vacío → NULL para no guardar strings vacíos.
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO pushcard_config (customer_sisfi_id, card_slots, reward_on_complete, card_expiry_days)
-		VALUES ($1, $2, NULLIF($3, '')::uuid, $4)
+		VALUES ($1, $2, NULLIF($3, ''), $4)
 		ON CONFLICT (customer_sisfi_id) DO UPDATE
 		SET card_slots = EXCLUDED.card_slots,
 		    reward_on_complete = EXCLUDED.reward_on_complete,
