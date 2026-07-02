@@ -103,9 +103,19 @@ func (m *mockVerifier) Verify(_ string) (*GoogleProfile, error) {
 	return m.profile, m.err
 }
 
-// helper to build a profile in tests.
+// helper to build a profile in tests. Populates the optional profile fields
+// (name / picture / locale / hosted_domain) so tests can assert they are
+// carried through onboarding and login.
 func tprofile(email, sub string) *GoogleProfile {
-	return &GoogleProfile{Email: email, Sub: sub, EmailVerified: true}
+	return &GoogleProfile{
+		Email:         email,
+		Sub:           sub,
+		EmailVerified: true,
+		FullName:      "Test User",
+		Picture:       "https://example.com/avatar.png",
+		Locale:        "es-MX",
+		HostedDomain:  "example.com",
+	}
 }
 
 func strPtr(s string) *string { return &s }
@@ -232,15 +242,76 @@ func TestGoogleLogin_VerifyFails(t *testing.T) {
 }
 
 func TestGoogleLogin_ExistingSub(t *testing.T) {
+	var gotID string
+	var gotProfile *GoogleProfile
 	repo := &mockRepo{
 		getByGoogleSubFn: func(sub string) (*Admin, error) {
 			return &Admin{ID: "a-1", Email: "user@gmail.com", CustomerID: "c-1", GoogleSub: &sub}, nil
+		},
+		updateGoogleProfileFn: func(adminID string, profile *GoogleProfile) error {
+			gotID = adminID
+			gotProfile = profile
+			return nil
 		},
 	}
 	svc := NewService(repo, "secret", &mockVerifier{profile: tprofile("user@gmail.com", "g-123")})
 	resp, err := svc.GoogleLogin("token")
 	require.NoError(t, err)
 	assert.Equal(t, "a-1", resp.Admin.ID)
+
+	// On a sub match, the cached profile must be refreshed with the token fields.
+	require.NotNil(t, gotProfile, "expected UpdateGoogleProfile to be called")
+	assert.Equal(t, "a-1", gotID)
+	assert.Equal(t, "Test User", gotProfile.FullName)
+	assert.Equal(t, "https://example.com/avatar.png", gotProfile.Picture)
+	assert.Equal(t, "es-MX", gotProfile.Locale)
+	assert.Equal(t, "example.com", gotProfile.HostedDomain)
+}
+
+// LG-1: a non-not-found error from GetByGoogleSub (e.g. DB failure) must
+// propagate, not silently fall back to email lookup + re-link.
+func TestGoogleLogin_SubLookupError_Propagates(t *testing.T) {
+	emailCalled := false
+	repo := &mockRepo{
+		getByGoogleSubFn: func(_ string) (*Admin, error) {
+			return nil, apperror.Internal("db exploded", nil)
+		},
+		getByEmailFn: func(_ string) (*Admin, error) {
+			emailCalled = true
+			return &Admin{ID: "a-1"}, nil
+		},
+	}
+	svc := NewService(repo, "secret", &mockVerifier{profile: tprofile("user@gmail.com", "g-123")})
+	_, err := svc.GoogleLogin("token")
+	require.Error(t, err)
+	assert.False(t, emailCalled, "must not fall back to email on a non-not-found error")
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, 500, appErr.HTTPStatus)
+}
+
+// LG-2: on re-login from a personal account (empty hd), the empty hosted_domain
+// must be forwarded to the repo so it can clear any previously stored domain.
+// The repo assigns hosted_domain directly (mapping "" -> NULL); here we assert
+// the service does not swallow the empty value before it reaches the repo.
+func TestGoogleLogin_ExistingSub_EmptyHostedDomainForwarded(t *testing.T) {
+	profile := tprofile("user@gmail.com", "g-123")
+	profile.HostedDomain = "" // personal account, previously a workspace one
+	var gotProfile *GoogleProfile
+	repo := &mockRepo{
+		getByGoogleSubFn: func(sub string) (*Admin, error) {
+			return &Admin{ID: "a-1", Email: "user@gmail.com", CustomerID: "c-1", GoogleSub: &sub, HostedDomain: strPtr("old.com")}, nil
+		},
+		updateGoogleProfileFn: func(_ string, p *GoogleProfile) error {
+			gotProfile = p
+			return nil
+		},
+	}
+	svc := NewService(repo, "secret", &mockVerifier{profile: profile})
+	_, err := svc.GoogleLogin("token")
+	require.NoError(t, err)
+	require.NotNil(t, gotProfile, "expected UpdateGoogleProfile to be called")
+	assert.Equal(t, "", gotProfile.HostedDomain, "empty hd must reach the repo to clear the stored domain")
 }
 
 func TestGoogleLogin_FallbackToEmailLinks(t *testing.T) {
@@ -304,6 +375,16 @@ func TestGoogleOnboard_Success(t *testing.T) {
 	assert.Equal(t, "g-7", *createdAdmin.GoogleSub)
 	require.NotNil(t, createdAdmin.GoogleEmail)
 	assert.Equal(t, "owner@gmail.com", *createdAdmin.GoogleEmail)
+
+	// Profile fields from the Google token must be persisted on the new admin.
+	require.NotNil(t, createdAdmin.FullName)
+	assert.Equal(t, "Test User", *createdAdmin.FullName)
+	require.NotNil(t, createdAdmin.AvatarURL)
+	assert.Equal(t, "https://example.com/avatar.png", *createdAdmin.AvatarURL)
+	require.NotNil(t, createdAdmin.Locale)
+	assert.Equal(t, "es-MX", *createdAdmin.Locale)
+	require.NotNil(t, createdAdmin.HostedDomain)
+	assert.Equal(t, "example.com", *createdAdmin.HostedDomain)
 }
 
 func TestGoogleOnboard_NotConfigured(t *testing.T) {

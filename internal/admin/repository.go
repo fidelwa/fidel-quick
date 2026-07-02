@@ -150,6 +150,11 @@ func (r *PostgresRepository) CustomerPhoneExists(phone string) (bool, error) {
 // LinkGoogle stores the full Google profile (sub + email + name + picture + ...)
 // against the admin. Used both for first-time linking and for refreshing the
 // profile on subsequent logins (Google may rotate picture URLs / change name).
+//
+// full_name/avatar_url/locale are preserved (COALESCE) when the new value is
+// empty — we don't want a scope-less token to wipe cached profile data.
+// hosted_domain, in contrast, is assigned directly so it always mirrors the
+// current account: an empty hd (personal account) clears any stale domain.
 func (r *PostgresRepository) LinkGoogle(adminID string, profile *GoogleProfile) error {
 	res, err := r.db.Exec(
 		`UPDATE admins SET
@@ -158,11 +163,11 @@ func (r *PostgresRepository) LinkGoogle(adminID string, profile *GoogleProfile) 
 			full_name = COALESCE(NULLIF($3, ''), full_name),
 			avatar_url = COALESCE(NULLIF($4, ''), avatar_url),
 			locale = COALESCE(NULLIF($5, ''), locale),
-			hosted_domain = COALESCE(NULLIF($6, ''), hosted_domain),
+			hosted_domain = $6,
 			updated_at = NOW()
 		 WHERE id = $7`,
 		profile.Sub, profile.Email,
-		profile.FullName, profile.Picture, profile.Locale, profile.HostedDomain,
+		profile.FullName, profile.Picture, profile.Locale, nullIfEmpty(profile.HostedDomain),
 		adminID,
 	)
 	if err != nil {
@@ -180,17 +185,19 @@ func (r *PostgresRepository) LinkGoogle(adminID string, profile *GoogleProfile) 
 
 // UpdateGoogleProfile refreshes the cached Google profile fields without
 // touching google_sub or google_email. Called on every successful Google login
-// to keep the avatar / name fresh.
+// to keep the avatar / name fresh. full_name/avatar_url/locale are preserved
+// when empty; hosted_domain is set directly so it tracks the current account
+// (an empty hd clears a previously stored domain).
 func (r *PostgresRepository) UpdateGoogleProfile(adminID string, profile *GoogleProfile) error {
 	res, err := r.db.Exec(
 		`UPDATE admins SET
 			full_name = COALESCE(NULLIF($1, ''), full_name),
 			avatar_url = COALESCE(NULLIF($2, ''), avatar_url),
 			locale = COALESCE(NULLIF($3, ''), locale),
-			hosted_domain = COALESCE(NULLIF($4, ''), hosted_domain),
+			hosted_domain = $4,
 			updated_at = NOW()
 		 WHERE id = $5`,
-		profile.FullName, profile.Picture, profile.Locale, profile.HostedDomain,
+		profile.FullName, profile.Picture, profile.Locale, nullIfEmpty(profile.HostedDomain),
 		adminID,
 	)
 	if err != nil {
@@ -220,6 +227,16 @@ func (r *PostgresRepository) UnlinkGoogle(adminID string) error {
 		return apperror.NotFound("admin not found", nil)
 	}
 	return nil
+}
+
+// nullIfEmpty maps an empty string to a SQL NULL and a non-empty string to
+// itself. Used for columns that must reflect the current account state (so an
+// empty value clears the column) rather than being preserved via COALESCE.
+func nullIfEmpty(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func nullableString(s *string) interface{} {

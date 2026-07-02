@@ -2,6 +2,7 @@ package admin
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -72,9 +73,14 @@ func (s *Service) GoogleLogin(googleToken string) (*AuthResponse, error) {
 		return nil, err
 	}
 
-	// Resolve by sub first; fall back to email and auto-link if found.
+	// Resolve by sub first; fall back to email and auto-link only when the sub
+	// is genuinely not linked yet. Any other error (DB down, etc.) must
+	// propagate — treating it as "not found" would silently re-link accounts.
 	admin, err := s.repo.GetByGoogleSub(profile.Sub)
 	if err != nil {
+		if !isNotFound(err) {
+			return nil, err
+		}
 		admin, err = s.repo.GetByEmail(profile.Email)
 		if err != nil {
 			return nil, err
@@ -149,6 +155,16 @@ func (s *Service) GoogleOnboard(req GoogleOnboardingRequest) (*AuthResponse, err
 	}
 
 	return s.makeAuthResponse(admin)
+}
+
+// isNotFound reports whether err represents a "resource not found" condition,
+// so callers can distinguish a missing row from a real failure (DB errors, etc.).
+func isNotFound(err error) bool {
+	var appErr *apperror.AppError
+	if errors.As(err, &appErr) {
+		return appErr.Code == "not_found"
+	}
+	return false
 }
 
 // strPtrIf returns nil for empty strings, &s otherwise. Avoids storing
