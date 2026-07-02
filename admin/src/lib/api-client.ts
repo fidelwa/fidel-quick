@@ -263,7 +263,11 @@ export const getPushcardConfig = (customerId: string) =>
 
 export const upsertPushcardConfig = (
   customerSisfiID: string,
-  data: { card_slots: number; reward_on_complete?: string }
+  data: {
+    card_slots: number
+    reward_on_complete?: string
+    card_expiry_days?: number | null
+  }
 ) =>
   request<PushcardConfig>(`/pushcard/programs/${customerSisfiID}/config`, {
     method: "PUT",

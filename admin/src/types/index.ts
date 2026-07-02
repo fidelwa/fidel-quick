@@ -135,6 +135,8 @@ export interface PushcardConfig {
   card_slots: number
   reward_on_complete: string
   active: boolean
+  /** Días de vida de una tarjeta desde su creación; null = sin expiración. */
+  card_expiry_days: number | null
 }
 
 export interface PushcardCard {

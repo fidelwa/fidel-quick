@@ -34,6 +34,14 @@ import type { PushcardCard } from "@/types"
 const configSchema = z.object({
   card_slots: z.number().int().min(1, "Debe ser mayor a 0").max(50),
   reward_on_complete: z.string().optional(),
+  // Vacío = sin expiración. Si se ingresa, debe ser un entero > 0.
+  card_expiry_days: z
+    .string()
+    .optional()
+    .refine(
+      (v) => !v || (/^\d+$/.test(v) && Number(v) > 0),
+      "Debe ser un número de días mayor a 0, o dejarse vacío"
+    ),
 })
 
 type ConfigFormValues = z.infer<typeof configSchema>
@@ -79,7 +87,7 @@ export function PushcardPage() {
 
   const form = useForm<ConfigFormValues>({
     resolver: zodResolver(configSchema),
-    defaultValues: { card_slots: 10, reward_on_complete: "" },
+    defaultValues: { card_slots: 10, reward_on_complete: "", card_expiry_days: "" },
   })
 
   useEffect(() => {
@@ -87,15 +95,26 @@ export function PushcardPage() {
       form.reset({
         card_slots: config.card_slots,
         reward_on_complete: config.reward_on_complete ?? "",
+        card_expiry_days:
+          config.card_expiry_days != null ? String(config.card_expiry_days) : "",
       })
     }
   }, [config, form])
 
   const onSubmit = (values: ConfigFormValues) => {
-    upsert.mutate(values, {
-      onSuccess: () => toast.success("Configuración guardada"),
-      onError: (err) => toast.error(err.message),
-    })
+    upsert.mutate(
+      {
+        card_slots: values.card_slots,
+        reward_on_complete: values.reward_on_complete,
+        card_expiry_days: values.card_expiry_days
+          ? Number(values.card_expiry_days)
+          : null,
+      },
+      {
+        onSuccess: () => toast.success("Configuración guardada"),
+        onError: (err) => toast.error(err.message),
+      }
+    )
   }
 
   if (isLoading) {
@@ -166,6 +185,29 @@ export function PushcardPage() {
                   <FormControl>
                     <Input placeholder="opcional" {...field} />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="card_expiry_days"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Vida de la tarjeta (días)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      min="1"
+                      step="1"
+                      placeholder="Sin expiración"
+                      {...field}
+                    />
+                  </FormControl>
+                  <p className="text-muted-foreground text-xs">
+                    Días desde que se crea la tarjeta hasta que expira. Dejalo vacío
+                    para que no expire nunca.
+                  </p>
                   <FormMessage />
                 </FormItem>
               )}
