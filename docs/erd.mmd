@@ -43,6 +43,8 @@ erDiagram
         uuid id PK
         uuid customer_sisfi_id FK_UK
         int points_ratio "DEFAULT 1000, CHECK > 0"
+        int expiry_days "NULL, FID-34 vencimiento de puntos"
+        numeric min_ticket_amount "NUMERIC(12,2) NULL, FID-36 ticket mínimo"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -51,6 +53,10 @@ erDiagram
         uuid id PK
         uuid customer_sisfi_id FK_UK
         decimal cashback_rate "DECIMAL(5,4) CHECK > 0 AND <= 1"
+        int expiry_days "NULL, FID-34 vencimiento de saldo"
+        numeric min_ticket_amount "NUMERIC(12,2) NULL, FID-36 ticket mínimo"
+        numeric max_cashback_per_tx "NUMERIC(12,2) NULL, FID-37 cap por tx"
+        numeric max_cashback_per_period "NUMERIC(12,2) NULL, FID-37 cap por periodo"
         timestamptz created_at
         timestamptz updated_at
     }

@@ -41,6 +41,8 @@ type mockRepo struct {
 	updateRewardAdminFn            func(ctx context.Context, r *Reward) error
 	listFeedbackFn                 func(ctx context.Context, customerID string) ([]FeedbackEntry, error)
 	listClientsFn                  func(ctx context.Context, customerID string) ([]Client, error)
+	updateProgramFn                func(ctx context.Context, p *EarnBurnProgram, setActive *bool) error
+	expirePointsFn                 func(ctx context.Context, clientID, customerSisfiID string, expiryDays int) (int, error)
 }
 
 func (m *mockRepo) GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error) {
@@ -246,6 +248,20 @@ func (m *mockRepo) AdjustPointsTx(ctx context.Context, t *Transaction) (int, err
 
 func (m *mockRepo) EnsureBalance(ctx context.Context, clientID, customerSisfiID string) error {
 	return nil
+}
+
+func (m *mockRepo) UpdateProgram(ctx context.Context, p *EarnBurnProgram, setActive *bool) error {
+	if m.updateProgramFn != nil {
+		return m.updateProgramFn(ctx, p, setActive)
+	}
+	return nil
+}
+
+func (m *mockRepo) ExpirePoints(ctx context.Context, clientID, customerSisfiID string, expiryDays int) (int, error) {
+	if m.expirePointsFn != nil {
+		return m.expirePointsFn(ctx, clientID, customerSisfiID, expiryDays)
+	}
+	return 0, nil
 }
 func (m *mockRepo) GetClientPhone(ctx context.Context, clientID string) (string, error) {
 	return "", nil
@@ -763,4 +779,102 @@ func TestGenerateUUID(t *testing.T) {
 	// Two UUIDs should be different
 	uuid2 := generateUUID()
 	assert.NotEqual(t, uuid, uuid2)
+}
+
+// --- FID-36: ticket mínimo (earn_burn) ---
+
+func TestAddPoints_BelowMinTicket_NotCredited(t *testing.T) {
+	min := 100.0
+	credited := false
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*EarnBurnProgram, error) {
+			return &EarnBurnProgram{CustomerSisfiID: "cs-1", PointsRatio: 10, MinTicketAmount: &min}, nil
+		},
+		addPointsTxFn: func(_ context.Context, _ *Transaction) (int, error) {
+			credited = true
+			return 0, nil
+		},
+	}
+	svc := newTestService(repo, newMockCache())
+
+	_, err := svc.AddPoints(context.Background(), AddPointsReq{ClientID: "c1", CustomerSisfiID: "cs-1", Amount: 50})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ticket mínimo")
+	assert.False(t, credited, "no debe acreditar puntos por debajo del mínimo")
+}
+
+func TestAddPoints_AtOrAboveMinTicket_Credited(t *testing.T) {
+	min := 100.0
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*EarnBurnProgram, error) {
+			return &EarnBurnProgram{CustomerSisfiID: "cs-1", PointsRatio: 10, MinTicketAmount: &min}, nil
+		},
+		addPointsTxFn: func(_ context.Context, tx *Transaction) (int, error) { return tx.Amount, nil },
+	}
+	svc := newTestService(repo, newMockCache())
+
+	tx, err := svc.AddPoints(context.Background(), AddPointsReq{ClientID: "c1", CustomerSisfiID: "cs-1", Amount: 100})
+
+	require.NoError(t, err)
+	assert.Equal(t, 10, tx.Amount) // 100 / 10
+}
+
+func TestAddPoints_NoMinTicket_UnchangedBehavior(t *testing.T) {
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*EarnBurnProgram, error) {
+			return &EarnBurnProgram{CustomerSisfiID: "cs-1", PointsRatio: 10}, nil // MinTicketAmount nil
+		},
+		addPointsTxFn: func(_ context.Context, tx *Transaction) (int, error) { return tx.Amount, nil },
+	}
+	svc := newTestService(repo, newMockCache())
+
+	tx, err := svc.AddPoints(context.Background(), AddPointsReq{ClientID: "c1", CustomerSisfiID: "cs-1", Amount: 30})
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, tx.Amount)
+}
+
+// --- FID-34: expiración lazy (earn_burn) ---
+
+func TestCheckBalance_ExpiryConfigured_UsesExpireSweep(t *testing.T) {
+	days := 30
+	called := false
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*EarnBurnProgram, error) {
+			return &EarnBurnProgram{CustomerSisfiID: "cs-1", PointsRatio: 10, ExpiryDays: &days}, nil
+		},
+		expirePointsFn: func(_ context.Context, _, _ string, expiryDays int) (int, error) {
+			called = true
+			assert.Equal(t, 30, expiryDays)
+			return 7, nil
+		},
+		getBalanceFn: func(_ context.Context, _, _ string) (int, error) { return 99, nil },
+	}
+	svc := newTestService(repo, newMockCache())
+
+	bal, err := svc.CheckBalance(context.Background(), "c1", "cs-1")
+
+	require.NoError(t, err)
+	assert.True(t, called, "debe correr el sweep de expiración")
+	assert.Equal(t, 7, bal, "debe usar el balance del sweep, no getBalance")
+}
+
+func TestCheckBalance_NoExpiry_UnchangedBehavior(t *testing.T) {
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*EarnBurnProgram, error) {
+			return &EarnBurnProgram{CustomerSisfiID: "cs-1", PointsRatio: 10}, nil // ExpiryDays nil
+		},
+		expirePointsFn: func(_ context.Context, _, _ string, _ int) (int, error) {
+			t.Fatal("no debe expirar cuando expiry_days es nil")
+			return 0, nil
+		},
+		getBalanceFn: func(_ context.Context, _, _ string) (int, error) { return 42, nil },
+	}
+	svc := newTestService(repo, newMockCache())
+
+	bal, err := svc.CheckBalance(context.Background(), "c1", "cs-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, 42, bal)
 }

@@ -24,8 +24,20 @@ export function useCreateCashbackProgram() {
 export function useUpdateCashbackProgram(id: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: Partial<Pick<CashbackProgram, "name" | "cashback_rate" | "active">>) =>
-      updateCashbackProgram(id, data),
+    mutationFn: (
+      data: Partial<
+        Pick<
+          CashbackProgram,
+          | "name"
+          | "cashback_rate"
+          | "active"
+          | "expiry_days"
+          | "min_ticket_amount"
+          | "max_cashback_per_tx"
+          | "max_cashback_per_period"
+        >
+      >,
+    ) => updateCashbackProgram(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cashback-programs"] })
     },

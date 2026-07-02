@@ -63,6 +63,12 @@ type EarnBurnProgram struct {
 	Name            string `json:"name"`
 	PointsRatio     int    `json:"points_ratio"`
 	Active          bool   `json:"active"`
+	// ExpiryDays (FID-34): días tras los cuales los puntos de una carga vencen.
+	// nil = sin vencimiento (comportamiento por defecto).
+	ExpiryDays *int `json:"expiry_days"`
+	// MinTicketAmount (FID-36): monto mínimo de compra para acreditar puntos.
+	// nil = sin mínimo (comportamiento por defecto).
+	MinTicketAmount *float64 `json:"min_ticket_amount"`
 }
 
 type AddPointsReq struct {

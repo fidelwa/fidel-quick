@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/lib/pq"
@@ -33,6 +34,9 @@ type Repository interface {
 	GetProgram(ctx context.Context, customerID string) (*CashbackProgram, error)
 	GetProgramByID(ctx context.Context, customerSisfiID string) (*CashbackProgram, error)
 	CreateProgram(ctx context.Context, p *CashbackProgram) error
+	UpdateProgram(ctx context.Context, p *CashbackProgram, setActive *bool) error
+	ExpireBalance(ctx context.Context, clientID, customerSisfiID string, expiryDays int) (float64, error)
+	SumCashbackInWindow(ctx context.Context, clientID, customerSisfiID string, windowDays int) (float64, error)
 	GetBalance(ctx context.Context, clientID, customerSisfiID string) (float64, error)
 	UpsertBalance(ctx context.Context, clientID, customerSisfiID string, delta float64) (float64, error)
 	CreateTransaction(ctx context.Context, tx *CashbackTransaction) error
@@ -78,17 +82,51 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// cashbackConfigCols are the config_cashback columns loaded onto every program.
+const cashbackConfigCols = "cc.cashback_rate, cc.expiry_days, cc.min_ticket_amount, cc.max_cashback_per_tx, cc.max_cashback_per_period"
+
+// cashbackConfigScan holds the nullable config columns for scanning.
+type cashbackConfigScan struct {
+	rate      float64
+	expiry    sql.NullInt64
+	minTicket sql.NullFloat64
+	maxTx     sql.NullFloat64
+	maxPeriod sql.NullFloat64
+}
+
+func (s *cashbackConfigScan) apply(p *CashbackProgram) {
+	p.CashbackRate = s.rate
+	if s.expiry.Valid {
+		d := int(s.expiry.Int64)
+		p.ExpiryDays = &d
+	}
+	if s.minTicket.Valid {
+		v := s.minTicket.Float64
+		p.MinTicketAmount = &v
+	}
+	if s.maxTx.Valid {
+		v := s.maxTx.Float64
+		p.MaxCashbackPerTx = &v
+	}
+	if s.maxPeriod.Valid {
+		v := s.maxPeriod.Float64
+		p.MaxCashbackPerPeriod = &v
+	}
+}
+
 func (r *PostgresRepository) GetProgram(ctx context.Context, customerID string) (*CashbackProgram, error) {
 	var p CashbackProgram
+	var cfg cashbackConfigScan
 	err := r.db.QueryRowContext(ctx,
-		`SELECT cs.id, cs.customer_id, cs.name, cc.cashback_rate, cs.active
+		`SELECT cs.id, cs.customer_id, cs.name, `+cashbackConfigCols+`, cs.active
 		 FROM customer_sisfi cs
 		 JOIN config_cashback cc ON cc.customer_sisfi_id = cs.id
 		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'cashback' AND cs.active = true`, customerID,
-	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.CashbackRate, &p.Active)
+	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &cfg.rate, &cfg.expiry, &cfg.minTicket, &cfg.maxTx, &cfg.maxPeriod, &p.Active)
 	if err != nil {
 		return nil, fmt.Errorf("get cashback program: %w", err)
 	}
+	cfg.apply(&p)
 	return &p, nil
 }
 
@@ -112,9 +150,10 @@ func (r *PostgresRepository) CreateProgram(ctx context.Context, p *CashbackProgr
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO config_cashback (customer_sisfi_id, cashback_rate)
-		VALUES ($1, $2)
-	`, customerSisfiID, p.CashbackRate); err != nil {
+		INSERT INTO config_cashback (customer_sisfi_id, cashback_rate, expiry_days, min_ticket_amount, max_cashback_per_tx, max_cashback_per_period)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, customerSisfiID, p.CashbackRate, nullableInt(p.ExpiryDays), nullableFloat(p.MinTicketAmount),
+		nullableFloat(p.MaxCashbackPerTx), nullableFloat(p.MaxCashbackPerPeriod)); err != nil {
 		return fmt.Errorf("insert config_cashback: %w", err)
 	}
 
@@ -128,16 +167,168 @@ func (r *PostgresRepository) CreateProgram(ctx context.Context, p *CashbackProgr
 
 func (r *PostgresRepository) GetProgramByID(ctx context.Context, customerSisfiID string) (*CashbackProgram, error) {
 	var p CashbackProgram
+	var cfg cashbackConfigScan
 	err := r.db.QueryRowContext(ctx,
-		`SELECT cs.id, cs.customer_id, cs.name, cc.cashback_rate, cs.active
+		`SELECT cs.id, cs.customer_id, cs.name, `+cashbackConfigCols+`, cs.active
 		 FROM customer_sisfi cs
 		 JOIN config_cashback cc ON cc.customer_sisfi_id = cs.id
 		 WHERE cs.id = $1`, customerSisfiID,
-	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.CashbackRate, &p.Active)
+	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &cfg.rate, &cfg.expiry, &cfg.minTicket, &cfg.maxTx, &cfg.maxPeriod, &p.Active)
 	if err != nil {
 		return nil, fmt.Errorf("get cashback program by id: %w", err)
 	}
+	cfg.apply(&p)
 	return &p, nil
+}
+
+// UpdateProgram updates the customer_sisfi name/active and the config_cashback
+// row.
+//
+// SEMÁNTICA (full-replace en config, LG-1/CF-2): expiry_days, min_ticket_amount,
+// max_cashback_per_tx y max_cashback_per_period se asignan SIEMPRE con el valor
+// recibido. Un puntero nil escribe NULL (limpia el límite: "sin vencimiento" /
+// "sin mínimo" / "sin cap"); NO deja el valor previo. Por eso el frontend debe
+// enviar SIEMPRE todos los campos de config actuales en cada PUT (incluido al
+// alternar `active`), o de lo contrario los borraría.
+// Excepción: cashback_rate usa COALESCE, así que un rate <= 0 (mapeado a nil) sí
+// preserva el valor previo, ya que un programa no puede quedar sin tasa.
+func (r *PostgresRepository) UpdateProgram(ctx context.Context, p *CashbackProgram, setActive *bool) error {
+	return r.WithTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE customer_sisfi
+			SET name = COALESCE(NULLIF($2, ''), name),
+			    active = COALESCE($3, active)
+			WHERE id = $1
+		`, p.CustomerSisfiID, p.Name, setActive); err != nil {
+			return fmt.Errorf("update customer_sisfi: %w", err)
+		}
+
+		var rate interface{}
+		if p.CashbackRate > 0 {
+			rate = p.CashbackRate
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE config_cashback
+			SET cashback_rate           = COALESCE($2::NUMERIC, cashback_rate),
+			    expiry_days             = $3,
+			    min_ticket_amount       = $4,
+			    max_cashback_per_tx     = $5,
+			    max_cashback_per_period = $6,
+			    updated_at              = NOW()
+			WHERE customer_sisfi_id = $1
+		`, p.CustomerSisfiID, rate, nullableInt(p.ExpiryDays), nullableFloat(p.MinTicketAmount),
+			nullableFloat(p.MaxCashbackPerTx), nullableFloat(p.MaxCashbackPerPeriod)); err != nil {
+			return fmt.Errorf("update config_cashback: %w", err)
+		}
+		return nil
+	})
+}
+
+// SumCashbackInWindow (FID-37) returns the total positive cashback ("earn")
+// credited to a client within the last windowDays.
+//
+// NOTE (LG-2): el techo por periodo ya NO se enforcea con esta función fuera de
+// la transacción (tenía una carrera check-then-insert). AddCashbackTx lee la
+// misma suma DENTRO de la tx y recorta el monto de forma atómica. Esta función
+// queda para consultas/reportes de solo lectura.
+func (r *PostgresRepository) SumCashbackInWindow(ctx context.Context, clientID, customerSisfiID string, windowDays int) (float64, error) {
+	var total float64
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(amount), 0)
+		FROM transactions_cashback
+		WHERE client_id = $1 AND customer_sisfi_id = $2
+		  AND type = 'earn' AND amount > 0
+		  AND created_at >= NOW() - ($3 * INTERVAL '1 day')
+	`, clientID, customerSisfiID, windowDays).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("sum cashback in window: %w", err)
+	}
+	return total, nil
+}
+
+// ExpireBalance (FID-34) posts a compensating "expiration" transaction for each
+// earn transaction older than expiryDays not yet expired, then returns the
+// resulting balance. Idempotent (tracked by an expiration tx referencing the
+// earn tx id in description). Balance floors at 0.
+func (r *PostgresRepository) ExpireBalance(ctx context.Context, clientID, customerSisfiID string, expiryDays int) (float64, error) {
+	var newBalance float64
+	err := r.WithTx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT e.id, e.amount
+			FROM transactions_cashback e
+			WHERE e.client_id = $1 AND e.customer_sisfi_id = $2
+			  AND e.type = 'earn' AND e.amount > 0
+			  AND e.created_at < NOW() - ($3 * INTERVAL '1 day')
+			  AND NOT EXISTS (
+			      SELECT 1 FROM transactions_cashback x
+			      WHERE x.type = 'expiration' AND x.description = e.id::text
+			  )
+		`, clientID, customerSisfiID, expiryDays)
+		if err != nil {
+			return fmt.Errorf("select expiring cashback: %w", err)
+		}
+		type expired struct {
+			id     string
+			amount float64
+		}
+		var toExpire []expired
+		for rows.Next() {
+			var e expired
+			if err := rows.Scan(&e.id, &e.amount); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan expiring cashback: %w", err)
+			}
+			toExpire = append(toExpire, e)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate expiring cashback: %w", err)
+		}
+
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COALESCE((SELECT balance FROM balances_cashback WHERE client_id = $1 AND customer_sisfi_id = $2), 0)`,
+			clientID, customerSisfiID,
+		).Scan(&newBalance); err != nil {
+			return fmt.Errorf("read cashback balance: %w", err)
+		}
+
+		for _, e := range toExpire {
+			if err := tx.QueryRowContext(ctx, `
+				UPDATE balances_cashback
+				SET balance = GREATEST(0, balance - $3::NUMERIC), updated_at = NOW()
+				WHERE client_id = $1 AND customer_sisfi_id = $2
+				RETURNING balance
+			`, clientID, customerSisfiID, e.amount).Scan(&newBalance); err != nil {
+				if err == sql.ErrNoRows {
+					newBalance = 0
+				} else {
+					return fmt.Errorf("deduct expired cashback: %w", err)
+				}
+			}
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO transactions_cashback (id, client_id, customer_sisfi_id, type, amount, balance_after, description)
+				VALUES ($1, $2, $3, 'expiration', $4::NUMERIC, $5::NUMERIC, $6)
+			`, generateUUID(), clientID, customerSisfiID, -e.amount, newBalance, e.id); err != nil {
+				return fmt.Errorf("insert cashback expiration tx: %w", err)
+			}
+		}
+		return nil
+	})
+	return newBalance, err
+}
+
+func nullableInt(v *int) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func nullableFloat(v *float64) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 func (r *PostgresRepository) GetBalance(ctx context.Context, clientID, customerSisfiID string) (float64, error) {
@@ -418,9 +609,39 @@ func (r *PostgresRepository) WithTx(ctx context.Context, fn func(tx *sql.Tx) err
 }
 
 // AddCashbackTx atomically creates a transaction and updates balance.
+//
+// FID-37 (LG-2, cap por periodo atómico): cuando t.PeriodCap es no-nil, la suma
+// de la ventana se lee DENTRO de esta misma transacción y el monto a acreditar
+// (t.Amount) se recorta al remanente antes de tocar el balance. Así dos requests
+// concurrentes no pueden exceder el techo (la lectura+clamp+insert son atómicos
+// bajo la misma tx). Si el periodo ya está agotado devuelve ErrPeriodCapExhausted.
 func (r *PostgresRepository) AddCashbackTx(ctx context.Context, t *CashbackTransaction) (float64, error) {
 	var newBalance float64
 	err := r.WithTx(ctx, func(tx *sql.Tx) error {
+		// Cap por periodo: leer la ventana DENTRO de la tx y recortar el monto.
+		if t.PeriodCap != nil {
+			var accumulated float64
+			if err := tx.QueryRowContext(ctx, `
+				SELECT COALESCE(SUM(amount), 0)
+				FROM transactions_cashback
+				WHERE client_id = $1 AND customer_sisfi_id = $2
+				  AND type = 'earn' AND amount > 0
+				  AND created_at >= NOW() - ($3 * INTERVAL '1 day')
+			`, t.ClientID, t.CustomerSisfiID, t.PeriodWindowDays).Scan(&accumulated); err != nil {
+				return fmt.Errorf("sum cashback in window: %w", err)
+			}
+			remaining := *t.PeriodCap - accumulated
+			if remaining <= 0 {
+				return ErrPeriodCapExhausted
+			}
+			if t.Amount > remaining {
+				t.Amount = math.Floor(remaining*100) / 100
+			}
+			if t.Amount <= 0 {
+				return ErrPeriodCapExhausted
+			}
+		}
+
 		err := tx.QueryRowContext(ctx, `
 			INSERT INTO balances_cashback (client_id, customer_sisfi_id, balance)
 			VALUES ($1, $2, GREATEST(0, $3::NUMERIC))
@@ -530,7 +751,7 @@ func (r *PostgresRepository) AdjustCashbackTx(ctx context.Context, t *CashbackTr
 
 func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string) ([]CashbackProgram, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT cs.id, cs.customer_id, cs.name, cc.cashback_rate, cs.active
+		`SELECT cs.id, cs.customer_id, cs.name, `+cashbackConfigCols+`, cs.active
 		 FROM customer_sisfi cs
 		 JOIN config_cashback cc ON cc.customer_sisfi_id = cs.id
 		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'cashback' AND cs.active = true
@@ -544,9 +765,11 @@ func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string
 	var programs []CashbackProgram
 	for rows.Next() {
 		var p CashbackProgram
-		if err := rows.Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.CashbackRate, &p.Active); err != nil {
+		var cfg cashbackConfigScan
+		if err := rows.Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &cfg.rate, &cfg.expiry, &cfg.minTicket, &cfg.maxTx, &cfg.maxPeriod, &p.Active); err != nil {
 			return nil, fmt.Errorf("scan cashback program: %w", err)
 		}
+		cfg.apply(&p)
 		programs = append(programs, p)
 	}
 	return programs, nil

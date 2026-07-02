@@ -91,7 +91,10 @@ export const createProgram = (data: { customer_id: string; name: string; points_
     body: JSON.stringify(data),
   })
 
-export const updateProgram = (id: string, data: Partial<Pick<Program, "name" | "points_ratio" | "active">>) =>
+export const updateProgram = (
+  id: string,
+  data: Partial<Pick<Program, "name" | "points_ratio" | "active" | "expiry_days" | "min_ticket_amount">>,
+) =>
   request<Program>(`/programs/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
@@ -123,7 +126,21 @@ export const createCashbackProgram = (data: { customer_id: string; name: string;
     body: JSON.stringify(data),
   })
 
-export const updateCashbackProgram = (id: string, data: Partial<Pick<CashbackProgram, "name" | "cashback_rate" | "active">>) =>
+export const updateCashbackProgram = (
+  id: string,
+  data: Partial<
+    Pick<
+      CashbackProgram,
+      | "name"
+      | "cashback_rate"
+      | "active"
+      | "expiry_days"
+      | "min_ticket_amount"
+      | "max_cashback_per_tx"
+      | "max_cashback_per_period"
+    >
+  >,
+) =>
   request<CashbackProgram>(`/cashback-programs/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),

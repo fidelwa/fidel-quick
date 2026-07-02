@@ -1,6 +1,7 @@
 package cashback
 
 import (
+	"errors"
 	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
@@ -14,6 +15,19 @@ type CashbackProgram struct {
 	Name            string  `json:"name"`
 	CashbackRate    float64 `json:"cashback_rate"`
 	Active          bool    `json:"active"`
+	// ExpiryDays (FID-34): días tras los cuales el saldo de una acreditación vence.
+	// nil = sin vencimiento (comportamiento por defecto).
+	ExpiryDays *int `json:"expiry_days"`
+	// MinTicketAmount (FID-36): monto mínimo de compra para acreditar cashback.
+	// nil = sin mínimo (comportamiento por defecto).
+	MinTicketAmount *float64 `json:"min_ticket_amount"`
+	// MaxCashbackPerTx (FID-37): techo de cashback por transacción.
+	// nil = sin cap (comportamiento por defecto).
+	MaxCashbackPerTx *float64 `json:"max_cashback_per_tx"`
+	// MaxCashbackPerPeriod (FID-37): techo de cashback acumulado en la ventana de
+	// expiry_days (o el mes calendario si expiry_days es nil).
+	// nil = sin cap (comportamiento por defecto).
+	MaxCashbackPerPeriod *float64 `json:"max_cashback_per_period"`
 }
 
 type CashbackTransaction struct {
@@ -39,7 +53,19 @@ type CashbackTransaction struct {
 	ReceiptHash       string   `json:"receipt_hash,omitempty"`
 	ReceiptHashFields []string `json:"receipt_hash_fields,omitempty"`
 	ReceiptConfident  bool     `json:"receipt_confident,omitempty"`
+
+	// FID-37 (cap por periodo, LG-2): parámetros transitorios para que
+	// AddCashbackTx aplique el techo por periodo DENTRO de la misma transacción
+	// (lectura de la ventana + clamp + insert atómicos), evitando la carrera de
+	// dos requests concurrentes que exceden el cap. No se persisten.
+	// PeriodCap nil = sin cap por periodo; PeriodWindowDays es la ventana en días.
+	PeriodCap        *float64 `json:"-"`
+	PeriodWindowDays int      `json:"-"`
 }
+
+// ErrPeriodCapExhausted (FID-37) se devuelve cuando el techo por periodo ya se
+// alcanzó al momento de acreditar dentro de la transacción (chequeo atómico).
+var ErrPeriodCapExhausted = errors.New("se alcanzó el máximo de cashback del periodo")
 
 type CashbackReward struct {
 	ID              string  `json:"id"`
