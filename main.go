@@ -207,6 +207,7 @@ func (a *photoAdapter) ProcessPhoto(ctx context.Context, imageURL string) (*flow
 		StorageURL: result.StorageURL,
 		Amount:     result.Amount,
 		Currency:   result.Currency,
+		Invoice:    result.Invoice,
 	}, nil
 }
 

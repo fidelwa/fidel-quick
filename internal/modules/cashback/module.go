@@ -2,15 +2,32 @@ package cashback
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/theluisbolivar/fidel-quick/internal/flow"
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
 	"github.com/theluisbolivar/fidel-quick/internal/phone"
+	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
 )
+
+// invoiceFromData deserializes the invoice extract the flow engine stashed under
+// flow.ReceiptDataKey. Returns nil when absent or unparseable (manual/legacy).
+func invoiceFromData(data map[string]string) *ai.InvoiceResult {
+	raw := data[flow.ReceiptDataKey]
+	if raw == "" {
+		return nil
+	}
+	var inv ai.InvoiceResult
+	if err := json.Unmarshal([]byte(raw), &inv); err != nil {
+		return nil
+	}
+	return &inv
+}
 
 // Module implements loyalty.Module for the cashback system.
 type Module struct {
@@ -261,6 +278,7 @@ func (m *Module) handleLoadProcess(ctx context.Context, cmd loyalty.Command) (*l
 		CollaboratorID:  cmd.UserContext.UserID,
 		Amount:          amount,
 		InvoiceURL:      photoURL,
+		Invoice:         invoiceFromData(cmd.Data),
 	})
 	if err != nil {
 		return nil, err
@@ -301,6 +319,7 @@ func (m *Module) handleAddCashback(ctx context.Context, cmd loyalty.Command) (*l
 		CollaboratorID:  cmd.UserContext.UserID,
 		Amount:          amount,
 		InvoiceURL:      photoURL,
+		Invoice:         invoiceFromData(cmd.Data),
 	})
 	if err != nil {
 		return nil, err
