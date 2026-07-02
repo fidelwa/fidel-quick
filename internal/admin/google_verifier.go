@@ -19,17 +19,39 @@ const (
 	googleIssuer2 = "https://accounts.google.com"
 )
 
+// GoogleProfile holds the user info extracted from a verified Google ID token.
+// Email + Sub are always populated. Profile fields (FullName, AvatarURL, ...)
+// are only populated when the client requested the `profile` scope; consumers
+// must treat them as optional.
+type GoogleProfile struct {
+	Sub           string // stable Google user id; canonical PK
+	Email         string
+	EmailVerified bool
+	FullName      string // claim "name"
+	GivenName     string
+	FamilyName    string
+	Picture       string // URL to the user's profile picture
+	Locale        string // BCP47 (e.g. "en", "es-MX")
+	HostedDomain  string // Google Workspace tenant domain (claim "hd"), empty for personal accounts
+}
+
 // GoogleVerifier validates Google ID tokens locally using Google's published JWKS.
 // It caches the keys in memory and refreshes them when an unknown kid appears
 // (key rotation) or when the cache expires.
 type GoogleVerifier interface {
-	Verify(idToken string) (email, sub string, err error)
+	Verify(idToken string) (*GoogleProfile, error)
 }
 
 type googleClaims struct {
 	jwt.RegisteredClaims
 	Email         string `json:"email"`
 	EmailVerified bool   `json:"email_verified"`
+	Name          string `json:"name"`
+	GivenName     string `json:"given_name"`
+	FamilyName    string `json:"family_name"`
+	Picture       string `json:"picture"`
+	Locale        string `json:"locale"`
+	HostedDomain  string `json:"hd"`
 }
 
 type jwksKey struct {
@@ -66,9 +88,9 @@ func NewGoogleVerifier(clientID string) GoogleVerifier {
 	}
 }
 
-func (v *googleVerifier) Verify(idToken string) (string, string, error) {
+func (v *googleVerifier) Verify(idToken string) (*GoogleProfile, error) {
 	if v.clientID == "" {
-		return "", "", fmt.Errorf("google login not configured")
+		return nil, fmt.Errorf("google login not configured")
 	}
 
 	parser := jwt.NewParser(
@@ -94,21 +116,31 @@ func (v *googleVerifier) Verify(idToken string) (string, string, error) {
 		claimsAlt := &googleClaims{}
 		tokenAlt, errAlt := parserAlt.ParseWithClaims(idToken, claimsAlt, v.keyFunc)
 		if errAlt != nil {
-			return "", "", fmt.Errorf("verify google token: %w", err)
+			return nil, fmt.Errorf("verify google token: %w", err)
 		}
 		token, claims = tokenAlt, claimsAlt
 	}
 
 	if !token.Valid {
-		return "", "", fmt.Errorf("invalid google token")
+		return nil, fmt.Errorf("invalid google token")
 	}
 	if !claims.EmailVerified {
-		return "", "", fmt.Errorf("google email not verified")
+		return nil, fmt.Errorf("google email not verified")
 	}
 	if claims.Subject == "" || claims.Email == "" {
-		return "", "", fmt.Errorf("google token missing sub or email")
+		return nil, fmt.Errorf("google token missing sub or email")
 	}
-	return claims.Email, claims.Subject, nil
+	return &GoogleProfile{
+		Sub:           claims.Subject,
+		Email:         claims.Email,
+		EmailVerified: claims.EmailVerified,
+		FullName:      claims.Name,
+		GivenName:     claims.GivenName,
+		FamilyName:    claims.FamilyName,
+		Picture:       claims.Picture,
+		Locale:        claims.Locale,
+		HostedDomain:  claims.HostedDomain,
+	}, nil
 }
 
 func (v *googleVerifier) keyFunc(token *jwt.Token) (interface{}, error) {

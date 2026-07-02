@@ -166,7 +166,7 @@ func TestGoogleLogin_API_Success(t *testing.T) {
 			return &Admin{ID: "a-1", Email: "u@gmail.com", CustomerID: "c-1", GoogleSub: &sub}, nil
 		},
 	}
-	r := setupRouter(repo, &mockVerifier{email: "u@gmail.com", sub: "g-1"})
+	r := setupRouter(repo, &mockVerifier{profile: tprofile("u@gmail.com", "g-1")})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/v1/auth/login/google",
@@ -212,7 +212,7 @@ func TestLinkGoogle_API_Success(t *testing.T) {
 			return &Admin{ID: id, Email: "admin@x.com", CustomerID: "c-1", GoogleEmail: &gmail}, nil
 		},
 	}
-	r := setupAuthenticatedRouter(repo, &mockVerifier{email: "u@gmail.com", sub: "g-1"}, "a-1")
+	r := setupAuthenticatedRouter(repo, &mockVerifier{profile: tprofile("u@gmail.com", "g-1")}, "a-1")
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/v1/auth/link/google",
@@ -243,7 +243,7 @@ func TestLinkGoogle_API_Conflict(t *testing.T) {
 			return &Admin{ID: "other-admin"}, nil
 		},
 	}
-	r := setupAuthenticatedRouter(repo, &mockVerifier{email: "u@gmail.com", sub: "g-1"}, "a-1")
+	r := setupAuthenticatedRouter(repo, &mockVerifier{profile: tprofile("u@gmail.com", "g-1")}, "a-1")
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/v1/auth/link/google",
 		strings.NewReader(`{"google_token":"tok"}`))
