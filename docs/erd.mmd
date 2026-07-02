@@ -157,6 +157,10 @@ erDiagram
         text correction_reason
         text correction_evidence_url
         timestamptz correctable_until
+        jsonb receipt_data "extract IA completo (anti-fraude)"
+        text receipt_hash "SHA-256 canónico; UNIQUE(customer_sisfi_id, receipt_hash) parcial"
+        text_array receipt_hash_fields "campos usados en el hash"
+        boolean receipt_confident "flag de confianza del extract"
         timestamptz created_at
     }
 
@@ -214,6 +218,10 @@ erDiagram
         text correction_reason
         text correction_evidence_url
         timestamptz correctable_until
+        jsonb receipt_data "extract IA completo (anti-fraude)"
+        text receipt_hash "SHA-256 canónico; UNIQUE(customer_sisfi_id, receipt_hash) parcial"
+        text_array receipt_hash_fields "campos usados en el hash"
+        boolean receipt_confident "flag de confianza del extract"
         timestamptz created_at
     }
 

@@ -5,9 +5,23 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/lib/pq"
 )
+
+// ErrDuplicateReceipt is returned when a receipt with the same canonical hash was
+// already registered for the same customer_sisfi (business + program). Detected
+// via the partial unique index idx_transactions_earnburn_receipt_hash.
+var ErrDuplicateReceipt = errors.New("ticket ya registrado")
+
+// isUniqueViolation reports whether err is a Postgres unique_violation (23505).
+func isUniqueViolation(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "23505"
+}
 
 type Repository interface {
 	GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error)
@@ -415,16 +429,35 @@ func (r *PostgresRepository) AddPointsTx(ctx context.Context, t *Transaction) (i
 
 		t.BalanceAfter = newBalance
 
-		// Create transaction record
+		// Create transaction record. receipt_hash is inserted as NULL when empty
+		// so the partial unique index only guards confidently-hashed tickets.
+		// A unique violation here rolls back the whole tx (balance included), so a
+		// duplicate ticket never credits points.
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO transactions_earnburn
-			(id, client_id, customer_sisfi_id, collaborator_id, type, amount, balance_after, invoice_url, description, manual_entry, correctable_until)
-			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, $11)
+			(id, client_id, customer_sisfi_id, collaborator_id, type, amount, balance_after, invoice_url, description, manual_entry, correctable_until, receipt_data, receipt_hash, receipt_hash_fields, receipt_confident)
+			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, $11, $12, NULLIF($13, ''), $14, $15)
 		`, t.ID, t.ClientID, t.CustomerSisfiID, t.CollaboratorID, t.Type, t.Amount, t.BalanceAfter,
-			t.InvoiceURL, t.Description, t.ManualEntry, t.CorrectableUntil)
-		return err
+			t.InvoiceURL, t.Description, t.ManualEntry, t.CorrectableUntil,
+			nullableJSON(t.ReceiptData), t.ReceiptHash, pq.Array(t.ReceiptHashFields), t.ReceiptConfident)
+		if err != nil {
+			if isUniqueViolation(err) {
+				return ErrDuplicateReceipt
+			}
+			return err
+		}
+		return nil
 	})
 	return newBalance, err
+}
+
+// nullableJSON returns nil (SQL NULL) for empty payloads so JSONB columns stay
+// NULL rather than storing an empty string / "null" literal.
+func nullableJSON(b []byte) interface{} {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
 }
 
 // BurnPointsTx atomically deducts points and creates a redemption record.
