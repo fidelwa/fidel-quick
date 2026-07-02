@@ -169,7 +169,15 @@ func (r *PostgresRepository) GetProgramByID(ctx context.Context, customerSisfiID
 }
 
 // UpdateProgram updates the customer_sisfi name/active and the config_earnburn
-// row for a program. Nil config pointers leave the corresponding column unchanged.
+// row for a program.
+//
+// SEMÁNTICA (full-replace en config, LG-1): expiry_days y min_ticket_amount se
+// asignan SIEMPRE con el valor recibido. Un puntero nil escribe NULL (limpia el
+// límite: "sin vencimiento" / "sin mínimo"); NO deja el valor previo. Por eso el
+// frontend debe enviar SIEMPRE todos los campos de config actuales en cada PUT
+// (incluido al alternar `active`), o de lo contrario los borraría.
+// Excepción: points_ratio usa COALESCE, así que un ratio <= 0 (mapeado a nil) sí
+// preserva el valor previo, ya que un programa no puede quedar sin ratio.
 func (r *PostgresRepository) UpdateProgram(ctx context.Context, p *EarnBurnProgram, setActive *bool) error {
 	return r.WithTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `

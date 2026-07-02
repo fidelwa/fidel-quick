@@ -77,8 +77,13 @@ func (h *APIHandler) createProgram(c *gin.Context) {
 
 // updateProgram updates cashback config (name, cashback_rate, active) plus the
 // loyalty options: expiry_days (FID-34), min_ticket_amount (FID-36),
-// max_cashback_per_tx y max_cashback_per_period (FID-37). Los límites vacíos
-// (omitidos/null) se guardan como NULL => sin límite.
+// max_cashback_per_tx y max_cashback_per_period (FID-37).
+//
+// FULL-REPLACE (LG-1/CF-2): estos cuatro límites son full-replace en la capa de
+// repositorio — un valor ausente en el JSON llega como nil y ESCRIBE NULL (borra
+// el límite). El frontend por tanto debe enviar SIEMPRE los cuatro campos con su
+// valor actual (vacío => null => sin límite), incluso al alternar `active`. Un
+// cap explícito debe ser > 0 (0 se rechaza; ver Service.UpdateProgram, LG-4).
 func (h *APIHandler) updateProgram(c *gin.Context) {
 	var req struct {
 		Name                 string   `json:"name"`

@@ -86,8 +86,11 @@ func (h *APIHandler) createProgram(c *gin.Context) {
 
 // updateProgram updates program config (name, points_ratio, active) plus the
 // loyalty options: expiry_days (FID-34) y min_ticket_amount (FID-36).
-// Los campos ausentes/omitidos no se modifican salvo expiry_days/min_ticket_amount,
-// que se envían siempre desde el form (vacío => NULL, sin límite).
+//
+// FULL-REPLACE (LG-1): expiry_days y min_ticket_amount son full-replace en la
+// capa de repositorio — un valor ausente en el JSON llega como nil y ESCRIBE NULL
+// (borra el límite). El frontend por tanto debe enviar SIEMPRE ambos campos con su
+// valor actual (vacío => null => sin límite), incluso al alternar `active`.
 func (h *APIHandler) updateProgram(c *gin.Context) {
 	var req struct {
 		Name            string   `json:"name"`

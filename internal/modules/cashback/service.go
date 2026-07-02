@@ -49,29 +49,9 @@ func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*Cashbac
 	}
 
 	// FID-37: caps de cashback. nil = sin cap.
-	// Techo por transacción.
+	// Techo por transacción (depende solo del monto de la compra, sin carrera).
 	if program.MaxCashbackPerTx != nil && cashbackAmount > *program.MaxCashbackPerTx {
 		cashbackAmount = *program.MaxCashbackPerTx
-	}
-	// Techo por periodo: sumamos lo acumulado en la ventana (expiry_days o 30
-	// días por defecto) y recortamos el excedente. Si ya se alcanzó el techo,
-	// no se acredita.
-	if program.MaxCashbackPerPeriod != nil {
-		windowDays := 30
-		if program.ExpiryDays != nil {
-			windowDays = *program.ExpiryDays
-		}
-		accumulated, sumErr := s.repo.SumCashbackInWindow(ctx, req.ClientID, req.CustomerSisfiID, windowDays)
-		if sumErr != nil {
-			return nil, fmt.Errorf("sum cashback window: %w", sumErr)
-		}
-		remaining := *program.MaxCashbackPerPeriod - accumulated
-		if remaining <= 0 {
-			return nil, fmt.Errorf("se alcanzó el máximo de cashback del periodo ($%.2f)", *program.MaxCashbackPerPeriod)
-		}
-		if cashbackAmount > remaining {
-			cashbackAmount = math.Floor(remaining*100) / 100
-		}
 	}
 
 	if cashbackAmount <= 0 {
@@ -92,6 +72,19 @@ func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*Cashbac
 		CorrectableUntil: &correctableUntil,
 	}
 
+	// FID-37 (LG-2): techo por periodo aplicado de forma ATÓMICA dentro de
+	// AddCashbackTx. Pasamos el cap y la ventana (expiry_days o 30 días por
+	// defecto); la lectura de la suma acumulada y el clamp ocurren en la misma
+	// transacción que el insert, evitando la carrera de requests concurrentes.
+	if program.MaxCashbackPerPeriod != nil {
+		windowDays := 30
+		if program.ExpiryDays != nil {
+			windowDays = *program.ExpiryDays
+		}
+		tx.PeriodCap = program.MaxCashbackPerPeriod
+		tx.PeriodWindowDays = windowDays
+	}
+
 	// Anti-fraude (FID-33): persistir el extract y calcular el hash de dedup.
 	if req.Invoice != nil {
 		fp, err := ai.ComputeFingerprint(req.Invoice)
@@ -109,8 +102,14 @@ func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*Cashbac
 		if errors.Is(err, ErrDuplicateReceipt) {
 			return nil, apperror.Conflict("ticket ya registrado", err)
 		}
+		if errors.Is(err, ErrPeriodCapExhausted) {
+			return nil, fmt.Errorf("se alcanzó el máximo de cashback del periodo ($%.2f)", *program.MaxCashbackPerPeriod)
+		}
 		return nil, fmt.Errorf("add cashback tx: %w", err)
 	}
+
+	// El monto pudo recortarse dentro de la tx por el cap por periodo.
+	cashbackAmount = tx.Amount
 
 	tx.BalanceAfter = newBalance
 
@@ -451,11 +450,14 @@ func (s *Service) UpdateProgram(ctx context.Context, p *CashbackProgram, setActi
 	if p.MinTicketAmount != nil && *p.MinTicketAmount < 0 {
 		return apperror.BadRequest("min_ticket_amount no puede ser negativo", nil)
 	}
-	if p.MaxCashbackPerTx != nil && *p.MaxCashbackPerTx < 0 {
-		return apperror.BadRequest("max_cashback_per_tx no puede ser negativo", nil)
+	// FID-37 (LG-4): un cap de 0 envenenaría el programa (bloquearía todo el
+	// cashback). "Sin cap" se representa con null (campo vacío en el form), no
+	// con 0. Por eso un cap no-nil debe ser estrictamente > 0.
+	if p.MaxCashbackPerTx != nil && *p.MaxCashbackPerTx <= 0 {
+		return apperror.BadRequest("max_cashback_per_tx debe ser mayor a 0 (vacío = sin límite)", nil)
 	}
-	if p.MaxCashbackPerPeriod != nil && *p.MaxCashbackPerPeriod < 0 {
-		return apperror.BadRequest("max_cashback_per_period no puede ser negativo", nil)
+	if p.MaxCashbackPerPeriod != nil && *p.MaxCashbackPerPeriod <= 0 {
+		return apperror.BadRequest("max_cashback_per_period debe ser mayor a 0 (vacío = sin límite)", nil)
 	}
 	if err := s.repo.UpdateProgram(ctx, p, setActive); err != nil {
 		return apperror.Internal("error al actualizar programa cashback", err)

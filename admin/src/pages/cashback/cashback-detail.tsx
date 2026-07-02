@@ -44,13 +44,19 @@ const optionalNumber = z
   .string()
   .refine((v) => v === "" || (!isNaN(Number(v)) && Number(v) >= 0), "Debe ser un número >= 0")
 
+// FID-37 (LG-4): los caps de cashback, si se especifican, deben ser > 0. Un 0
+// envenenaría el programa (bloquearía todo el cashback); "sin límite" = vacío.
+const optionalPositive = z
+  .string()
+  .refine((v) => v === "" || (!isNaN(Number(v)) && Number(v) > 0), "Debe ser mayor a 0 (vacío = sin límite)")
+
 const programSchema = z.object({
   name: z.string().min(1, "El nombre es requerido"),
   cashback_rate: z.number().min(0.01),
   expiry_days: optionalNumber,
   min_ticket_amount: optionalNumber,
-  max_cashback_per_tx: optionalNumber,
-  max_cashback_per_period: optionalNumber,
+  max_cashback_per_tx: optionalPositive,
+  max_cashback_per_period: optionalPositive,
 })
 
 const rewardSchema = z.object({
@@ -122,10 +128,25 @@ export function CashbackDetailPage() {
   }
 
   const onToggleActive = (active: boolean) => {
-    updateProgram.mutate({ active }, {
-      onSuccess: () => toast.success(active ? "Programa activado" : "Programa desactivado"),
-      onError: (err) => toast.error(err.message),
-    })
+    // LG-1: el PUT es full-replace en config (campos ausentes/null se limpian).
+    // Al alternar "activo" debemos re-enviar TODA la config actual del programa, o
+    // de lo contrario expiry/min-ticket/caps quedarían en NULL (sin límite).
+    if (!program) return
+    updateProgram.mutate(
+      {
+        active,
+        name: program.name,
+        cashback_rate: program.cashback_rate,
+        expiry_days: program.expiry_days ?? null,
+        min_ticket_amount: program.min_ticket_amount ?? null,
+        max_cashback_per_tx: program.max_cashback_per_tx ?? null,
+        max_cashback_per_period: program.max_cashback_per_period ?? null,
+      },
+      {
+        onSuccess: () => toast.success(active ? "Programa activado" : "Programa desactivado"),
+        onError: (err) => toast.error(err.message),
+      },
+    )
   }
 
   const onCreateReward = (values: RewardFormValues) => {

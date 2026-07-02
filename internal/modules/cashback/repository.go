@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/lib/pq"
@@ -181,8 +182,16 @@ func (r *PostgresRepository) GetProgramByID(ctx context.Context, customerSisfiID
 }
 
 // UpdateProgram updates the customer_sisfi name/active and the config_cashback
-// row. CashbackRate <= 0 leaves the rate unchanged; nil config pointers set the
-// corresponding column to NULL (sin límite).
+// row.
+//
+// SEMÁNTICA (full-replace en config, LG-1/CF-2): expiry_days, min_ticket_amount,
+// max_cashback_per_tx y max_cashback_per_period se asignan SIEMPRE con el valor
+// recibido. Un puntero nil escribe NULL (limpia el límite: "sin vencimiento" /
+// "sin mínimo" / "sin cap"); NO deja el valor previo. Por eso el frontend debe
+// enviar SIEMPRE todos los campos de config actuales en cada PUT (incluido al
+// alternar `active`), o de lo contrario los borraría.
+// Excepción: cashback_rate usa COALESCE, así que un rate <= 0 (mapeado a nil) sí
+// preserva el valor previo, ya que un programa no puede quedar sin tasa.
 func (r *PostgresRepository) UpdateProgram(ctx context.Context, p *CashbackProgram, setActive *bool) error {
 	return r.WithTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
@@ -216,8 +225,12 @@ func (r *PostgresRepository) UpdateProgram(ctx context.Context, p *CashbackProgr
 }
 
 // SumCashbackInWindow (FID-37) returns the total positive cashback ("earn")
-// credited to a client within the last windowDays. Used to enforce
-// max_cashback_per_period.
+// credited to a client within the last windowDays.
+//
+// NOTE (LG-2): el techo por periodo ya NO se enforcea con esta función fuera de
+// la transacción (tenía una carrera check-then-insert). AddCashbackTx lee la
+// misma suma DENTRO de la tx y recorta el monto de forma atómica. Esta función
+// queda para consultas/reportes de solo lectura.
 func (r *PostgresRepository) SumCashbackInWindow(ctx context.Context, clientID, customerSisfiID string, windowDays int) (float64, error) {
 	var total float64
 	err := r.db.QueryRowContext(ctx, `
@@ -596,9 +609,39 @@ func (r *PostgresRepository) WithTx(ctx context.Context, fn func(tx *sql.Tx) err
 }
 
 // AddCashbackTx atomically creates a transaction and updates balance.
+//
+// FID-37 (LG-2, cap por periodo atómico): cuando t.PeriodCap es no-nil, la suma
+// de la ventana se lee DENTRO de esta misma transacción y el monto a acreditar
+// (t.Amount) se recorta al remanente antes de tocar el balance. Así dos requests
+// concurrentes no pueden exceder el techo (la lectura+clamp+insert son atómicos
+// bajo la misma tx). Si el periodo ya está agotado devuelve ErrPeriodCapExhausted.
 func (r *PostgresRepository) AddCashbackTx(ctx context.Context, t *CashbackTransaction) (float64, error) {
 	var newBalance float64
 	err := r.WithTx(ctx, func(tx *sql.Tx) error {
+		// Cap por periodo: leer la ventana DENTRO de la tx y recortar el monto.
+		if t.PeriodCap != nil {
+			var accumulated float64
+			if err := tx.QueryRowContext(ctx, `
+				SELECT COALESCE(SUM(amount), 0)
+				FROM transactions_cashback
+				WHERE client_id = $1 AND customer_sisfi_id = $2
+				  AND type = 'earn' AND amount > 0
+				  AND created_at >= NOW() - ($3 * INTERVAL '1 day')
+			`, t.ClientID, t.CustomerSisfiID, t.PeriodWindowDays).Scan(&accumulated); err != nil {
+				return fmt.Errorf("sum cashback in window: %w", err)
+			}
+			remaining := *t.PeriodCap - accumulated
+			if remaining <= 0 {
+				return ErrPeriodCapExhausted
+			}
+			if t.Amount > remaining {
+				t.Amount = math.Floor(remaining*100) / 100
+			}
+			if t.Amount <= 0 {
+				return ErrPeriodCapExhausted
+			}
+		}
+
 		err := tx.QueryRowContext(ctx, `
 			INSERT INTO balances_cashback (client_id, customer_sisfi_id, balance)
 			VALUES ($1, $2, GREATEST(0, $3::NUMERIC))

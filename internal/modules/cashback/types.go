@@ -1,6 +1,7 @@
 package cashback
 
 import (
+	"errors"
 	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
@@ -52,7 +53,19 @@ type CashbackTransaction struct {
 	ReceiptHash       string   `json:"receipt_hash,omitempty"`
 	ReceiptHashFields []string `json:"receipt_hash_fields,omitempty"`
 	ReceiptConfident  bool     `json:"receipt_confident,omitempty"`
+
+	// FID-37 (cap por periodo, LG-2): parámetros transitorios para que
+	// AddCashbackTx aplique el techo por periodo DENTRO de la misma transacción
+	// (lectura de la ventana + clamp + insert atómicos), evitando la carrera de
+	// dos requests concurrentes que exceden el cap. No se persisten.
+	// PeriodCap nil = sin cap por periodo; PeriodWindowDays es la ventana en días.
+	PeriodCap        *float64 `json:"-"`
+	PeriodWindowDays int      `json:"-"`
 }
+
+// ErrPeriodCapExhausted (FID-37) se devuelve cuando el techo por periodo ya se
+// alcanzó al momento de acreditar dentro de la transacción (chequeo atómico).
+var ErrPeriodCapExhausted = errors.New("se alcanzó el máximo de cashback del periodo")
 
 type CashbackReward struct {
 	ID              string  `json:"id"`

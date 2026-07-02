@@ -110,10 +110,23 @@ export function ProgramDetailPage() {
   }
 
   const onToggleActive = (active: boolean) => {
-    updateProgram.mutate({ active }, {
-      onSuccess: () => toast.success(active ? "Programa activado" : "Programa desactivado"),
-      onError: (err) => toast.error(err.message),
-    })
+    // LG-1: el PUT es full-replace en config (campos ausentes/null se limpian).
+    // Al alternar "activo" debemos re-enviar TODA la config actual del programa,
+    // o de lo contrario expiry_days/min_ticket_amount quedarían en NULL.
+    if (!program) return
+    updateProgram.mutate(
+      {
+        active,
+        name: program.name,
+        points_ratio: program.points_ratio,
+        expiry_days: program.expiry_days ?? null,
+        min_ticket_amount: program.min_ticket_amount ?? null,
+      },
+      {
+        onSuccess: () => toast.success(active ? "Programa activado" : "Programa desactivado"),
+        onError: (err) => toast.error(err.message),
+      },
+    )
   }
 
   const onCreateReward = (values: RewardFormValues) => {
