@@ -24,6 +24,7 @@ func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	{
 		programs.GET("", h.listPrograms)
 		programs.POST("", h.createProgram)
+		programs.PUT("/:id", h.updateProgram)
 		programs.POST("/:id/rewards", h.createReward)
 		programs.GET("/:id/rewards", h.listRewards)
 		programs.PUT("/:id/rewards/:reward_id", h.updateReward)
@@ -81,6 +82,40 @@ func (h *APIHandler) createProgram(c *gin.Context) {
 		"points_ratio": p.PointsRatio,
 		"active":       true,
 	})
+}
+
+// updateProgram updates program config (name, points_ratio, active) plus the
+// loyalty options: expiry_days (FID-34) y min_ticket_amount (FID-36).
+//
+// FULL-REPLACE (LG-1): expiry_days y min_ticket_amount son full-replace en la
+// capa de repositorio — un valor ausente en el JSON llega como nil y ESCRIBE NULL
+// (borra el límite). El frontend por tanto debe enviar SIEMPRE ambos campos con su
+// valor actual (vacío => null => sin límite), incluso al alternar `active`.
+func (h *APIHandler) updateProgram(c *gin.Context) {
+	var req struct {
+		Name            string   `json:"name"`
+		PointsRatio     int      `json:"points_ratio"`
+		Active          *bool    `json:"active"`
+		ExpiryDays      *int     `json:"expiry_days"`
+		MinTicketAmount *float64 `json:"min_ticket_amount"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.BadRequest("datos invalidos", err))
+		return
+	}
+
+	p := &EarnBurnProgram{
+		CustomerSisfiID: c.Param("id"),
+		Name:            req.Name,
+		PointsRatio:     req.PointsRatio,
+		ExpiryDays:      req.ExpiryDays,
+		MinTicketAmount: req.MinTicketAmount,
+	}
+	if err := h.service.UpdateProgram(c.Request.Context(), p, req.Active); err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
 
 // --- Reward endpoints ---

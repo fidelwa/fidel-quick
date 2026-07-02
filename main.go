@@ -22,6 +22,7 @@ import (
 	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/cache"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/db"
+	"github.com/theluisbolivar/fidel-quick/internal/platform/email"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/logger"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/storage"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/whatsapp"
@@ -149,6 +150,11 @@ func main() {
 	}
 	adminService := admin.NewService(adminRepo, cfg.JWTSecret, googleVerifier)
 
+	// Password reset (FID-16): email sender + reset link base URL.
+	emailSender := email.NewSender(cfg.EmailProvider, cfg.EmailFrom, log)
+	adminService.WithPasswordReset(emailSender, cfg.AppURL, log)
+	log.Info("password reset enabled", "email_provider", cfg.EmailProvider, "app_url", cfg.AppURL)
+
 	// Feature flags (FID-26) — resolve override>global>default with a short
 	// Redis cache; exposed to admins for toggling and to the SPA via /auth/me.
 	ffRepo := featureflags.NewPostgresRepository(database)
@@ -211,6 +217,7 @@ func (a *photoAdapter) ProcessPhoto(ctx context.Context, imageURL string) (*flow
 		StorageURL: result.StorageURL,
 		Amount:     result.Amount,
 		Currency:   result.Currency,
+		Invoice:    result.Invoice,
 	}, nil
 }
 

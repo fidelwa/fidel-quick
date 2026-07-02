@@ -40,9 +40,16 @@ import { ArrowLeft, Plus, Upload, Loader2 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { formatPoints } from "@/lib/utils"
 
+// Los límites de config (FID-34/36) son opcionales: cadena vacía = sin límite (null).
+const optionalNumber = z
+  .string()
+  .refine((v) => v === "" || (!isNaN(Number(v)) && Number(v) >= 0), "Debe ser un número >= 0")
+
 const programSchema = z.object({
   name: z.string().min(1, "El nombre es requerido"),
   points_ratio: z.number().int().min(1),
+  expiry_days: optionalNumber,
+  min_ticket_amount: optionalNumber,
 })
 
 const rewardSchema = z.object({
@@ -69,7 +76,7 @@ export function ProgramDetailPage() {
 
   const programForm = useForm<ProgramFormValues>({
     resolver: zodResolver(programSchema),
-    defaultValues: { name: "", points_ratio: 1 },
+    defaultValues: { name: "", points_ratio: 1, expiry_days: "", min_ticket_amount: "" },
   })
 
   const rewardForm = useForm<RewardFormValues>({
@@ -79,22 +86,47 @@ export function ProgramDetailPage() {
 
   useEffect(() => {
     if (program) {
-      programForm.reset({ name: program.name, points_ratio: program.points_ratio })
+      programForm.reset({
+        name: program.name,
+        points_ratio: program.points_ratio,
+        expiry_days: program.expiry_days != null ? String(program.expiry_days) : "",
+        min_ticket_amount: program.min_ticket_amount != null ? String(program.min_ticket_amount) : "",
+      })
     }
   }, [program, programForm])
 
   const onUpdateProgram = (values: ProgramFormValues) => {
-    updateProgram.mutate(values, {
+    // Cadena vacía => null (sin límite).
+    const payload = {
+      name: values.name,
+      points_ratio: values.points_ratio,
+      expiry_days: values.expiry_days === "" ? null : Number(values.expiry_days),
+      min_ticket_amount: values.min_ticket_amount === "" ? null : Number(values.min_ticket_amount),
+    }
+    updateProgram.mutate(payload, {
       onSuccess: () => toast.success("Programa actualizado"),
       onError: (err) => toast.error(err.message),
     })
   }
 
   const onToggleActive = (active: boolean) => {
-    updateProgram.mutate({ active }, {
-      onSuccess: () => toast.success(active ? "Programa activado" : "Programa desactivado"),
-      onError: (err) => toast.error(err.message),
-    })
+    // LG-1: el PUT es full-replace en config (campos ausentes/null se limpian).
+    // Al alternar "activo" debemos re-enviar TODA la config actual del programa,
+    // o de lo contrario expiry_days/min_ticket_amount quedarían en NULL.
+    if (!program) return
+    updateProgram.mutate(
+      {
+        active,
+        name: program.name,
+        points_ratio: program.points_ratio,
+        expiry_days: program.expiry_days ?? null,
+        min_ticket_amount: program.min_ticket_amount ?? null,
+      },
+      {
+        onSuccess: () => toast.success(active ? "Programa activado" : "Programa desactivado"),
+        onError: (err) => toast.error(err.message),
+      },
+    )
   }
 
   const onCreateReward = (values: RewardFormValues) => {
@@ -207,6 +239,32 @@ export function ProgramDetailPage() {
                       <FormLabel>1 punto por cada $</FormLabel>
                       <FormControl>
                         <Input type="number" min={1} {...field} onChange={(e) => field.onChange(Number(e.target.value))} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={programForm.control}
+                  name="expiry_days"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Vencimiento de puntos (días)</FormLabel>
+                      <FormControl>
+                        <Input type="number" min={1} placeholder="Sin vencimiento" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={programForm.control}
+                  name="min_ticket_amount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Ticket mínimo ($)</FormLabel>
+                      <FormControl>
+                        <Input type="number" min={0} step="0.01" placeholder="Sin mínimo" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

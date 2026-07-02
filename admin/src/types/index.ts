@@ -39,6 +39,10 @@ export interface Program {
   name: string
   points_ratio: number
   active: boolean
+  // FID-34: días para que venzan los puntos. null = sin vencimiento.
+  expiry_days: number | null
+  // FID-36: monto mínimo de compra para acreditar. null = sin mínimo.
+  min_ticket_amount: number | null
 }
 
 export interface Reward {
@@ -57,6 +61,14 @@ export interface CashbackProgram {
   name: string
   cashback_rate: number
   active: boolean
+  // FID-34: días para que venza el saldo. null = sin vencimiento.
+  expiry_days: number | null
+  // FID-36: monto mínimo de compra para acreditar. null = sin mínimo.
+  min_ticket_amount: number | null
+  // FID-37: techo de cashback por transacción. null = sin cap.
+  max_cashback_per_tx: number | null
+  // FID-37: techo de cashback acumulado por periodo. null = sin cap.
+  max_cashback_per_period: number | null
 }
 
 export interface CashbackReward {
@@ -135,6 +147,8 @@ export interface PushcardConfig {
   card_slots: number
   reward_on_complete: string
   active: boolean
+  /** Días de vida de una tarjeta desde su creación; null = sin expiración. */
+  card_expiry_days: number | null
 }
 
 export interface PushcardCard {

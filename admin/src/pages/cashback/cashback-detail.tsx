@@ -39,9 +39,24 @@ import {
 import { ArrowLeft, Plus } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
 
+// Los límites de config (FID-34/36/37) son opcionales: cadena vacía = sin límite (null).
+const optionalNumber = z
+  .string()
+  .refine((v) => v === "" || (!isNaN(Number(v)) && Number(v) >= 0), "Debe ser un número >= 0")
+
+// FID-37 (LG-4): los caps de cashback, si se especifican, deben ser > 0. Un 0
+// envenenaría el programa (bloquearía todo el cashback); "sin límite" = vacío.
+const optionalPositive = z
+  .string()
+  .refine((v) => v === "" || (!isNaN(Number(v)) && Number(v) > 0), "Debe ser mayor a 0 (vacío = sin límite)")
+
 const programSchema = z.object({
   name: z.string().min(1, "El nombre es requerido"),
   cashback_rate: z.number().min(0.01),
+  expiry_days: optionalNumber,
+  min_ticket_amount: optionalNumber,
+  max_cashback_per_tx: optionalPositive,
+  max_cashback_per_period: optionalPositive,
 })
 
 const rewardSchema = z.object({
@@ -66,7 +81,14 @@ export function CashbackDetailPage() {
 
   const programForm = useForm<ProgramFormValues>({
     resolver: zodResolver(programSchema),
-    defaultValues: { name: "", cashback_rate: 0.05 },
+    defaultValues: {
+      name: "",
+      cashback_rate: 0.05,
+      expiry_days: "",
+      min_ticket_amount: "",
+      max_cashback_per_tx: "",
+      max_cashback_per_period: "",
+    },
   })
 
   const rewardForm = useForm<RewardFormValues>({
@@ -76,22 +98,55 @@ export function CashbackDetailPage() {
 
   useEffect(() => {
     if (program) {
-      programForm.reset({ name: program.name, cashback_rate: program.cashback_rate })
+      programForm.reset({
+        name: program.name,
+        cashback_rate: program.cashback_rate,
+        expiry_days: program.expiry_days != null ? String(program.expiry_days) : "",
+        min_ticket_amount: program.min_ticket_amount != null ? String(program.min_ticket_amount) : "",
+        max_cashback_per_tx: program.max_cashback_per_tx != null ? String(program.max_cashback_per_tx) : "",
+        max_cashback_per_period:
+          program.max_cashback_per_period != null ? String(program.max_cashback_per_period) : "",
+      })
     }
   }, [program, programForm])
 
   const onUpdateProgram = (values: ProgramFormValues) => {
-    updateProgram.mutate(values, {
+    // Cadena vacía => null (sin límite).
+    const toNull = (v: string) => (v === "" ? null : Number(v))
+    const payload = {
+      name: values.name,
+      cashback_rate: values.cashback_rate,
+      expiry_days: toNull(values.expiry_days),
+      min_ticket_amount: toNull(values.min_ticket_amount),
+      max_cashback_per_tx: toNull(values.max_cashback_per_tx),
+      max_cashback_per_period: toNull(values.max_cashback_per_period),
+    }
+    updateProgram.mutate(payload, {
       onSuccess: () => toast.success("Programa actualizado"),
       onError: (err) => toast.error(err.message),
     })
   }
 
   const onToggleActive = (active: boolean) => {
-    updateProgram.mutate({ active }, {
-      onSuccess: () => toast.success(active ? "Programa activado" : "Programa desactivado"),
-      onError: (err) => toast.error(err.message),
-    })
+    // LG-1: el PUT es full-replace en config (campos ausentes/null se limpian).
+    // Al alternar "activo" debemos re-enviar TODA la config actual del programa, o
+    // de lo contrario expiry/min-ticket/caps quedarían en NULL (sin límite).
+    if (!program) return
+    updateProgram.mutate(
+      {
+        active,
+        name: program.name,
+        cashback_rate: program.cashback_rate,
+        expiry_days: program.expiry_days ?? null,
+        min_ticket_amount: program.min_ticket_amount ?? null,
+        max_cashback_per_tx: program.max_cashback_per_tx ?? null,
+        max_cashback_per_period: program.max_cashback_per_period ?? null,
+      },
+      {
+        onSuccess: () => toast.success(active ? "Programa activado" : "Programa desactivado"),
+        onError: (err) => toast.error(err.message),
+      },
+    )
   }
 
   const onCreateReward = (values: RewardFormValues) => {
@@ -168,6 +223,58 @@ export function CashbackDetailPage() {
                       <FormLabel>Tasa de cashback</FormLabel>
                       <FormControl>
                         <Input type="number" step="0.01" min="0.01" {...field} onChange={(e) => field.onChange(Number(e.target.value))} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={programForm.control}
+                  name="expiry_days"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Vencimiento de saldo (días)</FormLabel>
+                      <FormControl>
+                        <Input type="number" min={1} placeholder="Sin vencimiento" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={programForm.control}
+                  name="min_ticket_amount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Ticket mínimo ($)</FormLabel>
+                      <FormControl>
+                        <Input type="number" min={0} step="0.01" placeholder="Sin mínimo" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={programForm.control}
+                  name="max_cashback_per_tx"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cashback máximo por transacción ($)</FormLabel>
+                      <FormControl>
+                        <Input type="number" min={0} step="0.01" placeholder="Sin límite" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={programForm.control}
+                  name="max_cashback_per_period"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cashback máximo por periodo ($)</FormLabel>
+                      <FormControl>
+                        <Input type="number" min={0} step="0.01" placeholder="Sin límite" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

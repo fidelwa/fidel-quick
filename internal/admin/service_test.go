@@ -3,6 +3,7 @@ package admin
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,6 +23,10 @@ type mockRepo struct {
 	linkGoogleFn          func(adminID string, profile *GoogleProfile) error
 	unlinkGoogleFn        func(adminID string) error
 	updateGoogleProfileFn func(adminID string, profile *GoogleProfile) error
+
+	createResetTokenFn func(adminID, tokenHash string, expiresAt time.Time) error
+	getResetTokenFn    func(tokenHash string) (*PasswordResetToken, error)
+	consumeResetFn     func(tokenID, adminID, newPasswordHash string) error
 }
 
 func (m *mockRepo) GetByEmail(email string) (*Admin, error) {
@@ -88,6 +93,27 @@ func (m *mockRepo) UnlinkGoogle(adminID string) error {
 func (m *mockRepo) UpdateGoogleProfile(adminID string, profile *GoogleProfile) error {
 	if m.updateGoogleProfileFn != nil {
 		return m.updateGoogleProfileFn(adminID, profile)
+	}
+	return nil
+}
+
+func (m *mockRepo) CreatePasswordResetToken(adminID, tokenHash string, expiresAt time.Time) error {
+	if m.createResetTokenFn != nil {
+		return m.createResetTokenFn(adminID, tokenHash, expiresAt)
+	}
+	return nil
+}
+
+func (m *mockRepo) GetPasswordResetToken(tokenHash string) (*PasswordResetToken, error) {
+	if m.getResetTokenFn != nil {
+		return m.getResetTokenFn(tokenHash)
+	}
+	return nil, apperror.NotFound("reset token not found", nil)
+}
+
+func (m *mockRepo) ConsumePasswordReset(tokenID, adminID, newPasswordHash string) error {
+	if m.consumeResetFn != nil {
+		return m.consumeResetFn(tokenID, adminID, newPasswordHash)
 	}
 	return nil
 }

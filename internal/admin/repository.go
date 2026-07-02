@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
 )
@@ -19,6 +21,16 @@ type Repository interface {
 	LinkGoogle(adminID string, profile *GoogleProfile) error
 	UnlinkGoogle(adminID string) error
 	UpdateGoogleProfile(adminID string, profile *GoogleProfile) error
+
+	// Password reset flow (FID-16).
+	CreatePasswordResetToken(adminID, tokenHash string, expiresAt time.Time) error
+	// GetPasswordResetToken returns the token row for tokenHash, or a
+	// NotFound apperror when it doesn't exist.
+	GetPasswordResetToken(tokenHash string) (*PasswordResetToken, error)
+	// ConsumePasswordReset, in a single transaction, sets the admin's
+	// password_hash, marks the given token used_at=now, and invalidates
+	// (marks used) any other unused tokens for the same admin.
+	ConsumePasswordReset(tokenID, adminID, newPasswordHash string) error
 }
 
 type PostgresRepository struct {
@@ -239,6 +251,92 @@ func nullIfEmpty(s string) interface{} {
 	return s
 }
 
+// --- Password reset (FID-16) ---
+
+func (r *PostgresRepository) CreatePasswordResetToken(adminID, tokenHash string, expiresAt time.Time) error {
+	_, err := r.db.Exec(
+		`INSERT INTO password_reset_tokens (admin_id, token_hash, expires_at)
+		 VALUES ($1, $2, $3)`,
+		adminID, tokenHash, expiresAt,
+	)
+	if err != nil {
+		return apperror.Internal("failed to create password reset token", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) GetPasswordResetToken(tokenHash string) (*PasswordResetToken, error) {
+	row := r.db.QueryRow(
+		`SELECT id, admin_id, token_hash, expires_at, used_at, created_at
+		 FROM password_reset_tokens WHERE token_hash = $1`,
+		tokenHash,
+	)
+	var t PasswordResetToken
+	var usedAt sql.NullTime
+	err := row.Scan(&t.ID, &t.AdminID, &t.TokenHash, &t.ExpiresAt, &usedAt, &t.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, apperror.NotFound("reset token not found", nil)
+	}
+	if err != nil {
+		return nil, apperror.Internal("failed to query reset token", err)
+	}
+	if usedAt.Valid {
+		v := usedAt.Time
+		t.UsedAt = &v
+	}
+	return &t, nil
+}
+
+// ConsumePasswordReset updates the password, marks the used token, and
+// invalidates any other outstanding tokens for the admin — atomically.
+func (r *PostgresRepository) ConsumePasswordReset(tokenID, adminID, newPasswordHash string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return apperror.Internal("failed to begin tx", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	res, err := tx.Exec(
+		`UPDATE admins SET password_hash = $1, updated_at = NOW() WHERE id = $2`,
+		newPasswordHash, adminID,
+	)
+	if err != nil {
+		return apperror.Internal("failed to update password", err)
+	}
+	// If no admin row was updated (deleted/nonexistent), abort so we neither
+	// mark the token used nor report success. The deferred Rollback undoes
+	// everything in this tx.
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return apperror.Internal("failed to read update result", err)
+	}
+	if rows == 0 {
+		return apperror.NotFound("admin not found", nil)
+	}
+
+	if _, err := tx.Exec(
+		`UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1`,
+		tokenID,
+	); err != nil {
+		return apperror.Internal("failed to mark token used", err)
+	}
+
+	// Invalidate every other still-usable token for this admin so a
+	// leaked/second link can't be reused after one succeeds.
+	if _, err := tx.Exec(
+		`UPDATE password_reset_tokens SET used_at = NOW()
+		 WHERE admin_id = $1 AND id <> $2 AND used_at IS NULL`,
+		adminID, tokenID,
+	); err != nil {
+		return apperror.Internal("failed to invalidate other tokens", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return apperror.Internal("failed to commit tx", err)
+	}
+	return nil
+}
+
 func nullableString(s *string) interface{} {
 	if s == nil {
 		return nil
@@ -255,19 +353,6 @@ func nullableToPtr(s sql.NullString) *string {
 }
 
 func isDuplicateKeyError(err error) bool {
-	return err != nil && (errors.Is(err, sql.ErrNoRows) == false) &&
-		(len(err.Error()) > 0 && contains(err.Error(), "duplicate key"))
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return err != nil && !errors.Is(err, sql.ErrNoRows) &&
+		strings.Contains(err.Error(), "duplicate key")
 }

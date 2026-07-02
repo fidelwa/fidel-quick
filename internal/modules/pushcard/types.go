@@ -10,6 +10,9 @@ type Config struct {
 	CardSlots        int    `json:"card_slots"`
 	RewardOnComplete string `json:"reward_on_complete"`
 	Active           bool   `json:"active"`
+	// CardExpiryDays is the number of days an 'open' card lives from its
+	// created_at before it is auto-cancelled. nil = never expires (default).
+	CardExpiryDays *int `json:"card_expiry_days"`
 }
 
 // Card represents a single client pushcard.
