@@ -14,6 +14,16 @@ erDiagram
         timestamptz created_at
     }
 
+    feature_flags {
+        text key PK "dominio.snake_case"
+        boolean enabled_globally
+        jsonb customer_overrides "customer_id -> bool"
+        boolean default_value
+        text description
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
     customers {
         uuid id PK
         varchar name
