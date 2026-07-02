@@ -59,9 +59,7 @@ func SetupRouter(
 	// Health probes (públicas) — Cloud Run liveness/readiness.
 	// /healthz: liveness (proceso vivo, sin tocar dependencias).
 	// /readyz: readiness (Postgres + Redis responden en <1s).
-	r.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	r.GET("/healthz", healthzHandler())
 	r.GET("/readyz", readyzHandler(database, redisClient))
 
 	// Landing page (public)
@@ -176,6 +174,15 @@ func serveSPAIndex(c *gin.Context, indexBytes []byte, indexErr error) {
 	}
 	c.Header("Cache-Control", "no-cache")
 	c.Data(http.StatusOK, "text/html; charset=utf-8", indexBytes)
+}
+
+// healthzHandler es el liveness probe: responde 200 {"status":"ok"} sin tocar
+// ninguna dependencia. Extraído a función nombrada para que los tests ejerciten
+// el handler real registrado en SetupRouter (no una copia inline).
+func healthzHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	}
 }
 
 // pingFunc verifica una dependencia dado un contexto (respeta su deadline).

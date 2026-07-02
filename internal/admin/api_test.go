@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -31,9 +32,27 @@ func setupRouter(repo Repository, verifier GoogleVerifier) *gin.Engine {
 	return r
 }
 
+// mockFlagResolver is a stub FlagResolver for /auth/me tests. It returns a fixed
+// flag map so the response includes the "flags" field.
+type mockFlagResolver struct {
+	flags map[string]bool
+	err   error
+}
+
+func (m *mockFlagResolver) EnabledFor(_ context.Context, _ string) (map[string]bool, error) {
+	return m.flags, m.err
+}
+
 func setupAuthenticatedRouter(repo Repository, verifier GoogleVerifier, adminID string) *gin.Engine {
+	return setupAuthenticatedRouterWithFlags(repo, verifier, adminID, nil)
+}
+
+func setupAuthenticatedRouterWithFlags(repo Repository, verifier GoogleVerifier, adminID string, flags FlagResolver) *gin.Engine {
 	svc := NewService(repo, "test-jwt-secret", verifier)
 	handler := NewAPIHandler(svc)
+	if flags != nil {
+		handler = handler.WithFlags(flags)
+	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	r := gin.New()
@@ -276,13 +295,28 @@ func TestMe_API_Success(t *testing.T) {
 			return &Admin{ID: id, Email: "admin@x.com", CustomerID: "c-1", GoogleEmail: &gmail}, nil
 		},
 	}
-	r := setupAuthenticatedRouter(repo, nil, "a-1")
+	// Wire a flag resolver so /auth/me includes the "flags" field used by the UI
+	// for feature gating. This asserts the flags wiring, not just the summary.
+	flags := &mockFlagResolver{flags: map[string]bool{"pushcard": true, "cashback": false}}
+	r := setupAuthenticatedRouterWithFlags(repo, nil, "a-1", flags)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/auth/me", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, 200, w.Code)
-	var summary AdminSummary
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &summary))
-	require.NotNil(t, summary.GoogleEmail)
-	assert.Equal(t, "u@gmail.com", *summary.GoogleEmail)
+
+	var resp MeResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.GoogleEmail)
+	assert.Equal(t, "u@gmail.com", *resp.GoogleEmail)
+
+	// The response must carry the flags map resolved for the caller's customer.
+	require.NotNil(t, resp.Flags, "expected /auth/me to include flags")
+	assert.Equal(t, true, resp.Flags["pushcard"])
+	assert.Equal(t, false, resp.Flags["cashback"])
+
+	// The raw JSON must expose a top-level "flags" key (contract for the frontend).
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	_, hasFlags := raw["flags"]
+	assert.True(t, hasFlags, `response JSON must include a "flags" field`)
 }

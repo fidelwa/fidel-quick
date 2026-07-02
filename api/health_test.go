@@ -16,12 +16,12 @@ func init() {
 }
 
 // TestHealthz verifica el liveness probe: 200 con {"status":"ok"} y sin
-// tocar ninguna dependencia (el handler no recibe DB ni Redis).
+// tocar ninguna dependencia (el handler no recibe DB ni Redis). Ejercita el
+// handler real (healthzHandler) que SetupRouter registra en /healthz, para que
+// una regresión en ese wiring rompa este test.
 func TestHealthz(t *testing.T) {
 	r := gin.New()
-	r.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	r.GET("/healthz", healthzHandler())
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
