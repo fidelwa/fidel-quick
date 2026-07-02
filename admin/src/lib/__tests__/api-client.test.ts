@@ -15,6 +15,7 @@ import {
   getCollaborators,
   createCollaborator,
   getClients,
+  getCustomerMetrics,
   getFeedback,
   loginAdmin,
   registerAdmin,
@@ -239,6 +240,14 @@ describe("client endpoints", () => {
     mockResponse([])
     await getClients("c1")
     expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining("/customers/c1/clients"), expect.any(Object))
+  })
+})
+
+describe("metrics endpoints", () => {
+  it("getCustomerMetrics calls correct URL", async () => {
+    mockResponse({ registered_clients: 0 })
+    await getCustomerMetrics("c1")
+    expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining("/customers/c1/metrics"), expect.any(Object))
   })
 })
 

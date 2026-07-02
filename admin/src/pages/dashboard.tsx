@@ -5,6 +5,7 @@ import { useCashbackPrograms } from "@/hooks/use-cashback-programs"
 import { usePushcardConfig } from "@/hooks/use-pushcard"
 import { useCollaborators } from "@/hooks/use-collaborators"
 import { useClients } from "@/hooks/use-clients"
+import { useCustomerMetrics } from "@/hooks/use-metrics"
 import {
   GlassCard,
   GlassCardContent,
@@ -21,7 +22,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Trophy, Users, UserCheck } from "lucide-react"
+import {
+  Trophy,
+  Users,
+  UserCheck,
+  Activity,
+  RefreshCw,
+  Repeat,
+  Receipt,
+  Wallet,
+  Gift,
+  TicketCheck,
+  PiggyBank,
+} from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 function formatDate(dateStr: string) {
@@ -30,6 +43,54 @@ function formatDate(dateStr: string) {
     month: "short",
     year: "numeric",
   })
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    maximumFractionDigits: 0,
+  }).format(value)
+}
+
+function formatPercent(fraction: number) {
+  return new Intl.NumberFormat("es-MX", {
+    style: "percent",
+    maximumFractionDigits: 1,
+  }).format(fraction)
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("es-MX", { maximumFractionDigits: 2 }).format(value)
+}
+
+type MetricCardProps = {
+  label: string
+  value: string
+  caption: string
+  icon: LucideIcon
+  accent: string
+}
+
+function MetricCard({ label, value, caption, icon: Icon, accent }: MetricCardProps) {
+  return (
+    <GlassCard variant="subtle" className="gap-3 py-5">
+      <GlassCardHeader className="items-center">
+        <GlassCardTitle className="text-xs font-medium text-muted-foreground">
+          {label}
+        </GlassCardTitle>
+        <div
+          className={`flex h-8 w-8 items-center justify-center rounded-full ${accent}`}
+        >
+          <Icon className="h-4 w-4" />
+        </div>
+      </GlassCardHeader>
+      <GlassCardContent>
+        <div className="text-2xl font-bold tracking-tight">{value}</div>
+        <p className="mt-1 text-xs text-muted-foreground">{caption}</p>
+      </GlassCardContent>
+    </GlassCard>
+  )
 }
 
 type KpiCardProps = {
@@ -72,6 +133,7 @@ export function DashboardPage() {
   const { data: pushcardConfig } = usePushcardConfig(customerId)
   const { data: collaborators } = useCollaborators(customerId)
   const { data: clients } = useClients(customerId)
+  const { data: metrics, isLoading: loadingMetrics } = useCustomerMetrics(customerId)
 
   const activeEarn = (programs ?? []).filter((p) => p.active).length
   const activeCashback = (cashbackPrograms ?? []).filter((p) => p.active).length
@@ -117,6 +179,100 @@ export function DashboardPage() {
           icon={Users}
           accent="bg-[#A8CDE0]/40 text-[#2c5d75]"
         />
+      </div>
+
+      {/* Métricas T1 — enriquecimiento del dashboard */}
+      <div>
+        <div className="mb-3">
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">
+            Métricas
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Actividad, participación y beneficios de tu programa
+          </p>
+        </div>
+
+        {loadingMetrics ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-28 rounded-2xl" />
+            ))}
+          </div>
+        ) : metrics ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricCard
+              label="Clientes activos"
+              value={formatNumber(metrics.active_clients)}
+              caption="Con actividad en 30 días"
+              icon={Activity}
+              accent="bg-[#B49DD9]/30 text-[#5b3d8a]"
+            />
+            <MetricCard
+              label="Reactivados"
+              value={formatNumber(metrics.reactivated_clients)}
+              caption="Volvieron tras inactividad"
+              icon={RefreshCw}
+              accent="bg-[#A8CDE0]/40 text-[#2c5d75]"
+            />
+            <MetricCard
+              label="Participación"
+              value={formatPercent(metrics.participation_rate)}
+              caption="Clientes que compran"
+              icon={Users}
+              accent="bg-[#E0B0CC]/40 text-[#8a3d6a]"
+            />
+            <MetricCard
+              label="Frecuencia de compra"
+              value={formatNumber(metrics.purchase_frequency)}
+              caption="Compras por participante"
+              icon={Repeat}
+              accent="bg-[#B49DD9]/30 text-[#5b3d8a]"
+            />
+            <MetricCard
+              label="Ticket promedio"
+              value={formatCurrency(metrics.average_ticket)}
+              caption="Por compra"
+              icon={Receipt}
+              accent="bg-[#A8CDE0]/40 text-[#2c5d75]"
+            />
+            <MetricCard
+              label="Gasto por cliente"
+              value={formatCurrency(metrics.spend_per_client)}
+              caption={`Total: ${formatCurrency(metrics.total_spend)}`}
+              icon={Wallet}
+              accent="bg-[#E0B0CC]/40 text-[#8a3d6a]"
+            />
+            <MetricCard
+              label="Beneficios"
+              value={formatCurrency(metrics.benefits_generated)}
+              caption={`Redimidos: ${formatCurrency(metrics.benefits_redeemed)}`}
+              icon={Gift}
+              accent="bg-[#B49DD9]/30 text-[#5b3d8a]"
+            />
+            <MetricCard
+              label="Tasa de redención"
+              value={formatPercent(metrics.redemption_rate)}
+              caption={`Costo: ${formatCurrency(metrics.benefits_cost)}`}
+              icon={TicketCheck}
+              accent="bg-[#A8CDE0]/40 text-[#2c5d75]"
+            />
+            <MetricCard
+              label="Ganancia potencial"
+              value={formatCurrency(metrics.potential_gain)}
+              caption="Saldos sin redimir"
+              icon={PiggyBank}
+              accent="bg-[#E0B0CC]/40 text-[#8a3d6a]"
+            />
+          </div>
+        ) : (
+          <GlassCard variant="subtle">
+            <GlassCardContent>
+              <p className="text-sm text-muted-foreground">
+                Sin métricas disponibles todavía
+              </p>
+            </GlassCardContent>
+          </GlassCard>
+        )}
       </div>
 
       {/* Clients table */}

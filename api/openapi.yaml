@@ -382,6 +382,50 @@ components:
           type: string
           format: date-time
 
+    CustomerMetrics:
+      type: object
+      description: Métricas agregadas T1 del dashboard para un customer.
+      properties:
+        registered_clients:
+          type: integer
+          description: Clientes registrados.
+        active_clients:
+          type: integer
+          description: Clientes con actividad en los últimos 30 días.
+        reactivated_clients:
+          type: integer
+          description: Clientes activos ahora que estuvieron inactivos previamente.
+        participation_rate:
+          type: number
+          description: Participantes / registrados (fracción 0..1).
+        purchase_frequency:
+          type: number
+          description: Compras promedio por cliente participante.
+        average_ticket:
+          type: number
+          description: Gasto promedio por compra (MXN).
+        spend_per_client:
+          type: number
+          description: Gasto por cliente participante (MXN).
+        total_spend:
+          type: number
+          description: Gasto total de participantes (MXN).
+        benefits_generated:
+          type: number
+          description: Valor de beneficios generados (MXN).
+        benefits_redeemed:
+          type: number
+          description: Valor de beneficios redimidos (MXN).
+        benefits_cost:
+          type: number
+          description: Costo de beneficios entregados (MXN).
+        potential_gain:
+          type: number
+          description: Saldos retenidos sin redimir (MXN).
+        redemption_rate:
+          type: number
+          description: Canjes confirmados / canjes totales (fracción 0..1).
+
 paths:
   # ========== Auth ==========
   /auth/login:
@@ -1005,3 +1049,26 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Feedback"
+
+  /customers/{id}/metrics:
+    get:
+      tags: [Metrics]
+      summary: Métricas T1 del dashboard de un customer
+      operationId: getCustomerMetrics
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID del customer
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Métricas agregadas del customer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerMetrics"
+        "404":
+          description: Customer no encontrado o sin pertenencia

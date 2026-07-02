@@ -16,31 +16,32 @@ import (
 // --- Mock Repository ---
 
 type mockRepo struct {
-	getProgramFn                   func(ctx context.Context, customerID string) (*EarnBurnProgram, error)
-	getBalanceFn                   func(ctx context.Context, clientID, customerSisfiID string) (int, error)
-	addPointsTxFn                  func(ctx context.Context, t *Transaction) (int, error)
-	getTransactionFn               func(ctx context.Context, id string) (*Transaction, error)
-	adjustPointsTxFn               func(ctx context.Context, t *Transaction) (int, error)
-	listTransactionsFn             func(ctx context.Context, clientID, customerSisfiID string, limit int) ([]Transaction, error)
-	listCorrectableTransactionsFn  func(ctx context.Context, clientID string) ([]Transaction, error)
-	getRewardFn                    func(ctx context.Context, id string) (*Reward, error)
-	listRewardsFn                  func(ctx context.Context, customerID, customerSisfiID string, maxPoints int) ([]Reward, error)
-	burnPointsTxFn                 func(ctx context.Context, t *Transaction, rd *Redemption) error
-	getRedemptionByCodeFn          func(ctx context.Context, code string) (*Redemption, error)
-	confirmRedemptionFn            func(ctx context.Context, id, collaboratorID string) error
-	getClientNameFn                func(ctx context.Context, clientID string) (string, error)
-	createFeedbackFn               func(ctx context.Context, clientID, customerID, message string) error
-	listProgramsFn                 func(ctx context.Context, customerID string) ([]EarnBurnProgram, error)
-	getCustomerFn                  func(ctx context.Context, id string) (*Customer, error)
-	createCustomerFn               func(ctx context.Context, c *Customer) error
-	updateCustomerFn               func(ctx context.Context, c *Customer) error
-	createCollaboratorFn           func(ctx context.Context, c *Collaborator) error
-	listCollaboratorsFn            func(ctx context.Context, customerID string) ([]Collaborator, error)
-	listAllRewardsFn               func(ctx context.Context, customerSisfiID string) ([]Reward, error)
-	createRewardAdminFn            func(ctx context.Context, customerSisfiID string, r *Reward) error
-	updateRewardAdminFn            func(ctx context.Context, r *Reward) error
-	listFeedbackFn                 func(ctx context.Context, customerID string) ([]FeedbackEntry, error)
-	listClientsFn                  func(ctx context.Context, customerID string) ([]Client, error)
+	getProgramFn                  func(ctx context.Context, customerID string) (*EarnBurnProgram, error)
+	getBalanceFn                  func(ctx context.Context, clientID, customerSisfiID string) (int, error)
+	addPointsTxFn                 func(ctx context.Context, t *Transaction) (int, error)
+	getTransactionFn              func(ctx context.Context, id string) (*Transaction, error)
+	adjustPointsTxFn              func(ctx context.Context, t *Transaction) (int, error)
+	listTransactionsFn            func(ctx context.Context, clientID, customerSisfiID string, limit int) ([]Transaction, error)
+	listCorrectableTransactionsFn func(ctx context.Context, clientID string) ([]Transaction, error)
+	getRewardFn                   func(ctx context.Context, id string) (*Reward, error)
+	listRewardsFn                 func(ctx context.Context, customerID, customerSisfiID string, maxPoints int) ([]Reward, error)
+	burnPointsTxFn                func(ctx context.Context, t *Transaction, rd *Redemption) error
+	getRedemptionByCodeFn         func(ctx context.Context, code string) (*Redemption, error)
+	confirmRedemptionFn           func(ctx context.Context, id, collaboratorID string) error
+	getClientNameFn               func(ctx context.Context, clientID string) (string, error)
+	createFeedbackFn              func(ctx context.Context, clientID, customerID, message string) error
+	listProgramsFn                func(ctx context.Context, customerID string) ([]EarnBurnProgram, error)
+	getCustomerFn                 func(ctx context.Context, id string) (*Customer, error)
+	createCustomerFn              func(ctx context.Context, c *Customer) error
+	updateCustomerFn              func(ctx context.Context, c *Customer) error
+	createCollaboratorFn          func(ctx context.Context, c *Collaborator) error
+	listCollaboratorsFn           func(ctx context.Context, customerID string) ([]Collaborator, error)
+	listAllRewardsFn              func(ctx context.Context, customerSisfiID string) ([]Reward, error)
+	createRewardAdminFn           func(ctx context.Context, customerSisfiID string, r *Reward) error
+	updateRewardAdminFn           func(ctx context.Context, r *Reward) error
+	listFeedbackFn                func(ctx context.Context, customerID string) ([]FeedbackEntry, error)
+	listClientsFn                 func(ctx context.Context, customerID string) ([]Client, error)
+	getMetricsRawFn               func(ctx context.Context, customerID string) (MetricsRaw, error)
 }
 
 func (m *mockRepo) GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error) {
@@ -222,6 +223,13 @@ func (m *mockRepo) ListClients(ctx context.Context, customerID string) ([]Client
 }
 
 func (m *mockRepo) RegisterClient(ctx context.Context, customerID, phone string) error { return nil }
+
+func (m *mockRepo) GetMetricsRaw(ctx context.Context, customerID string) (MetricsRaw, error) {
+	if m.getMetricsRawFn != nil {
+		return m.getMetricsRawFn(ctx, customerID)
+	}
+	return MetricsRaw{}, nil
+}
 
 func (m *mockRepo) AddPointsTx(ctx context.Context, t *Transaction) (int, error) {
 	if m.addPointsTxFn != nil {

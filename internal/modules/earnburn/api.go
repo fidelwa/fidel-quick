@@ -40,6 +40,7 @@ func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		customers.GET("/:id/collaborators", h.listCollaborators)
 		customers.GET("/:id/clients", h.listClients)
 		customers.GET("/:id/feedback", h.listFeedback)
+		customers.GET("/:id/metrics", h.getMetrics)
 	}
 }
 
@@ -327,3 +328,25 @@ func (h *APIHandler) listFeedback(c *gin.Context) {
 	c.JSON(http.StatusOK, entries)
 }
 
+// --- Métricas T1 (dashboard) ---
+
+// getMetrics devuelve las métricas agregadas T1 de un customer. Valida
+// pertenencia: si el request trae un customer_id en el JWT (lo setea el
+// middleware), debe coincidir con el :id de la ruta. Los tokens bearer legacy
+// (integraciones internas) no fijan customer_id y pasan sin restricción, igual
+// que el resto de endpoints /customers/:id del módulo.
+func (h *APIHandler) getMetrics(c *gin.Context) {
+	customerID := c.Param("id")
+
+	if jwtCustomerID := c.GetString("customer_id"); jwtCustomerID != "" && jwtCustomerID != customerID {
+		c.Error(apperror.NotFound("cliente no encontrado", nil))
+		return
+	}
+
+	metrics, err := h.service.GetCustomerMetrics(c.Request.Context(), customerID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, metrics)
+}

@@ -47,6 +47,9 @@ type Repository interface {
 	ListClients(ctx context.Context, customerID string) ([]Client, error)
 	RegisterClient(ctx context.Context, customerID, phone string) error
 
+	// Métricas T1 del dashboard (agregación cruda sobre earnburn + cashback).
+	GetMetricsRaw(ctx context.Context, customerID string) (MetricsRaw, error)
+
 	GetClientPhone(ctx context.Context, clientID string) (string, error)
 
 	// Transactional
@@ -648,6 +651,146 @@ func (r *PostgresRepository) ListClients(ctx context.Context, customerID string)
 		clients = append(clients, c)
 	}
 	return clients, nil
+}
+
+// metricsWindowDays define la ventana de actividad reciente (clientes activos /
+// reactivados). 30 días es la ventana estándar del negocio para "cliente activo".
+const metricsWindowDays = 30
+
+// reactivationGapDays: un cliente reactivado es aquel activo en la ventana
+// reciente cuya actividad previa quedó fuera de una ventana más amplia (60d),
+// evidenciando que "volvió" tras un periodo de inactividad.
+const reactivationGapDays = 60
+
+// GetMetricsRaw agrega los contadores crudos para las métricas T1 de un customer,
+// combinando los sistemas earnburn (puntos) y cashback (dinero). El cálculo
+// derivado (tasas, promedios) vive en ComputeMetrics para poder testearse aislado.
+//
+// Notas de diseño:
+//   - "actividad" = cualquier transacción del cliente en cualquiera de los dos
+//     sistemas (earn/burn/adjustment).
+//   - "compra" (participación / frecuencia / ticket) = transacción type='earn',
+//     que es la que representa una compra real del cliente.
+//   - gasto earnburn se reconstruye como puntos_acumulados * points_ratio
+//     (ratio = MXN por punto en config_earnburn); gasto cashback usa
+//     purchase_amount directo.
+//   - los beneficios monetarios (generados/redimidos/costo/pasivo) se toman del
+//     sistema cashback, único con semántica monetaria limpia; el earnburn aporta
+//     a la tasa de redención (conteo de canjes).
+func (r *PostgresRepository) GetMetricsRaw(ctx context.Context, customerID string) (MetricsRaw, error) {
+	var m MetricsRaw
+
+	// customer_sisfi ids del customer, por sistema, con su ratio de puntos.
+	// Todas las subconsultas se acotan a estos sisfi para no cruzar customers.
+	const query = `
+WITH eb_sisfi AS (
+    SELECT cs.id, ec.points_ratio
+    FROM customer_sisfi cs
+    JOIN config_earnburn ec ON ec.customer_sisfi_id = cs.id
+    WHERE cs.customer_id = $1 AND cs.sisfi_id = 'earn_burn'
+),
+cb_sisfi AS (
+    SELECT cs.id
+    FROM customer_sisfi cs
+    JOIN config_cashback cc ON cc.customer_sisfi_id = cs.id
+    WHERE cs.customer_id = $1 AND cs.sisfi_id = 'cashback'
+),
+-- Toda transacción del customer, unificada, con marca de compra (earn).
+activity AS (
+    SELECT t.client_id, t.created_at, (t.type = 'earn') AS is_purchase
+    FROM transactions_earnburn t
+    JOIN eb_sisfi s ON s.id = t.customer_sisfi_id
+    UNION ALL
+    SELECT t.client_id, t.created_at, (t.type = 'earn') AS is_purchase
+    FROM transactions_cashback t
+    JOIN cb_sisfi s ON s.id = t.customer_sisfi_id
+),
+by_client AS (
+    SELECT
+        client_id,
+        MAX(created_at) AS last_seen,
+        MAX(created_at) FILTER (
+            WHERE created_at < NOW() - ($3 || ' days')::interval
+        ) AS last_seen_before_window,
+        COUNT(*) FILTER (WHERE is_purchase) AS purchase_count
+    FROM activity
+    GROUP BY client_id
+),
+-- Gasto reconstruido: earnburn puntos*ratio + cashback purchase_amount.
+eb_spend AS (
+    SELECT COALESCE(SUM(t.amount * s.points_ratio), 0) AS total
+    FROM transactions_earnburn t
+    JOIN eb_sisfi s ON s.id = t.customer_sisfi_id
+    WHERE t.type = 'earn'
+),
+cb_spend AS (
+    SELECT COALESCE(SUM(t.purchase_amount), 0) AS total
+    FROM transactions_cashback t
+    JOIN cb_sisfi s ON s.id = t.customer_sisfi_id
+    WHERE t.type = 'earn' AND t.purchase_amount IS NOT NULL
+),
+cb_generated AS (
+    SELECT COALESCE(SUM(t.amount), 0) AS total
+    FROM transactions_cashback t
+    JOIN cb_sisfi s ON s.id = t.customer_sisfi_id
+    WHERE t.type = 'earn'
+),
+cb_redeemed AS (
+    SELECT COALESCE(SUM(rd.amount_spent), 0) AS total
+    FROM redemptions_cashback rd
+    JOIN cb_sisfi s ON s.id = rd.customer_sisfi_id
+    WHERE rd.status = 'confirmed'
+),
+cb_outstanding AS (
+    SELECT COALESCE(SUM(b.balance), 0) AS total
+    FROM balances_cashback b
+    JOIN cb_sisfi s ON s.id = b.customer_sisfi_id
+),
+-- Redenciones (ambos sistemas) para la tasa de redención.
+redemptions AS (
+    SELECT status FROM redemptions_earnburn rd
+    JOIN eb_sisfi s ON s.id = rd.customer_sisfi_id
+    UNION ALL
+    SELECT status FROM redemptions_cashback rd
+    JOIN cb_sisfi s ON s.id = rd.customer_sisfi_id
+)
+SELECT
+    (SELECT COUNT(*) FROM clients WHERE customer_id = $1) AS registered_clients,
+    (SELECT COUNT(*) FROM by_client
+        WHERE last_seen >= NOW() - ($2 || ' days')::interval) AS active_clients,
+    (SELECT COUNT(*) FROM by_client
+        WHERE last_seen >= NOW() - ($2 || ' days')::interval
+          AND last_seen_before_window IS NOT NULL
+          AND last_seen_before_window < NOW() - ($3 || ' days')::interval) AS reactivated_clients,
+    (SELECT COUNT(*) FROM by_client WHERE purchase_count > 0) AS participating_clients,
+    (SELECT COALESCE(SUM(purchase_count), 0) FROM by_client) AS purchase_count,
+    (SELECT total FROM eb_spend) + (SELECT total FROM cb_spend) AS total_spend,
+    (SELECT total FROM cb_generated) AS benefits_generated,
+    (SELECT total FROM cb_redeemed) AS benefits_redeemed,
+    (SELECT total FROM cb_redeemed) AS benefits_cost,
+    (SELECT total FROM cb_outstanding) AS outstanding_value,
+    (SELECT COUNT(*) FROM redemptions) AS total_redemptions,
+    (SELECT COUNT(*) FROM redemptions WHERE status = 'confirmed') AS confirmed_redemptions
+`
+
+	err := r.db.QueryRowContext(ctx, query, customerID, metricsWindowDays, reactivationGapDays).Scan(
+		&m.RegisteredClients,
+		&m.ActiveClients,
+		&m.ReactivatedClients,
+		&m.ParticipatingClients,
+		&m.PurchaseCount,
+		&m.TotalSpend,
+		&m.BenefitsGenerated,
+		&m.BenefitsRedeemed,
+		&m.BenefitsCost,
+		&m.OutstandingValue,
+		&m.TotalRedemptions,
+		&m.ConfirmedRedemptions,
+	)
+	if err != nil {
+		return MetricsRaw{}, fmt.Errorf("get metrics raw: %w", err)
+	}
+	return m, nil
 }
 
 func (r *PostgresRepository) RegisterClient(ctx context.Context, customerID, phone string) error {
