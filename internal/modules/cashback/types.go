@@ -10,6 +10,19 @@ type CashbackProgram struct {
 	Name            string  `json:"name"`
 	CashbackRate    float64 `json:"cashback_rate"`
 	Active          bool    `json:"active"`
+	// ExpiryDays (FID-34): días tras los cuales el saldo de una acreditación vence.
+	// nil = sin vencimiento (comportamiento por defecto).
+	ExpiryDays *int `json:"expiry_days"`
+	// MinTicketAmount (FID-36): monto mínimo de compra para acreditar cashback.
+	// nil = sin mínimo (comportamiento por defecto).
+	MinTicketAmount *float64 `json:"min_ticket_amount"`
+	// MaxCashbackPerTx (FID-37): techo de cashback por transacción.
+	// nil = sin cap (comportamiento por defecto).
+	MaxCashbackPerTx *float64 `json:"max_cashback_per_tx"`
+	// MaxCashbackPerPeriod (FID-37): techo de cashback acumulado en la ventana de
+	// expiry_days (o el mes calendario si expiry_days es nil).
+	// nil = sin cap (comportamiento por defecto).
+	MaxCashbackPerPeriod *float64 `json:"max_cashback_per_period"`
 }
 
 type CashbackTransaction struct {

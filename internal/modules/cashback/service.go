@@ -37,9 +37,44 @@ func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*Cashbac
 		return nil, fmt.Errorf("get cashback program: %w", err)
 	}
 
+	// FID-36: ticket mínimo. nil = sin mínimo.
+	if program.MinTicketAmount != nil && req.Amount < *program.MinTicketAmount {
+		return nil, fmt.Errorf("monto de compra ($%.2f) menor al ticket mínimo ($%.2f); no se acredita cashback", req.Amount, *program.MinTicketAmount)
+	}
+
 	cashbackAmount := math.Floor(req.Amount*program.CashbackRate*100) / 100
 	if cashbackAmount <= 0 {
 		return nil, fmt.Errorf("monto insuficiente para acumular cashback (rate: %.2f%%)", program.CashbackRate*100)
+	}
+
+	// FID-37: caps de cashback. nil = sin cap.
+	// Techo por transacción.
+	if program.MaxCashbackPerTx != nil && cashbackAmount > *program.MaxCashbackPerTx {
+		cashbackAmount = *program.MaxCashbackPerTx
+	}
+	// Techo por periodo: sumamos lo acumulado en la ventana (expiry_days o 30
+	// días por defecto) y recortamos el excedente. Si ya se alcanzó el techo,
+	// no se acredita.
+	if program.MaxCashbackPerPeriod != nil {
+		windowDays := 30
+		if program.ExpiryDays != nil {
+			windowDays = *program.ExpiryDays
+		}
+		accumulated, sumErr := s.repo.SumCashbackInWindow(ctx, req.ClientID, req.CustomerSisfiID, windowDays)
+		if sumErr != nil {
+			return nil, fmt.Errorf("sum cashback window: %w", sumErr)
+		}
+		remaining := *program.MaxCashbackPerPeriod - accumulated
+		if remaining <= 0 {
+			return nil, fmt.Errorf("se alcanzó el máximo de cashback del periodo ($%.2f)", *program.MaxCashbackPerPeriod)
+		}
+		if cashbackAmount > remaining {
+			cashbackAmount = math.Floor(remaining*100) / 100
+		}
+	}
+
+	if cashbackAmount <= 0 {
+		return nil, fmt.Errorf("monto insuficiente para acumular cashback tras aplicar límites")
 	}
 
 	correctableUntil := time.Now().Add(correctionWindow)
@@ -75,7 +110,19 @@ func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*Cashbac
 }
 
 // CheckBalance returns the current cashback balance for a client.
+//
+// FID-34 (expiración lazy): si el programa tiene expiry_days configurado, expira
+// de forma perezosa las acreditaciones vencidas antes de devolver el saldo.
+// nil = sin vencimiento, comportamiento intacto.
 func (s *Service) CheckBalance(ctx context.Context, clientID, customerSisfiID string) (float64, error) {
+	program, err := s.repo.GetProgramByID(ctx, customerSisfiID)
+	if err == nil && program.ExpiryDays != nil {
+		if balance, expErr := s.repo.ExpireBalance(ctx, clientID, customerSisfiID, *program.ExpiryDays); expErr == nil {
+			return balance, nil
+		} else {
+			s.log.Error("expire cashback failed, returning stored balance", "error", expErr, "client_id", clientID)
+		}
+	}
 	return s.repo.GetBalance(ctx, clientID, customerSisfiID)
 }
 
@@ -364,6 +411,38 @@ func (s *Service) CreateProgram(ctx context.Context, p *CashbackProgram) error {
 	}
 	if err := s.repo.CreateProgram(ctx, p); err != nil {
 		return apperror.Internal("error al crear programa cashback", err)
+	}
+	return nil
+}
+
+// UpdateProgram updates an existing cashback program's name, cashback_rate and
+// the loyalty config options (expiry_days, min_ticket_amount, max_cashback_per_tx,
+// max_cashback_per_period). cashback_rate se normaliza igual que en CreateProgram
+// (acepta porcentaje 0-100 o fracción 0-1). setActive nil deja el flag intacto.
+func (s *Service) UpdateProgram(ctx context.Context, p *CashbackProgram, setActive *bool) error {
+	if p.CustomerSisfiID == "" {
+		return apperror.BadRequest("id de programa requerido", nil)
+	}
+	if p.CashbackRate > 1 {
+		p.CashbackRate = p.CashbackRate / 100
+	}
+	if p.CashbackRate < 0 || p.CashbackRate > 1 {
+		return apperror.BadRequest("cashback_rate debe estar entre 0 y 1 (o entre 0 y 100 si es porcentaje)", nil)
+	}
+	if p.ExpiryDays != nil && *p.ExpiryDays <= 0 {
+		return apperror.BadRequest("expiry_days debe ser mayor a 0", nil)
+	}
+	if p.MinTicketAmount != nil && *p.MinTicketAmount < 0 {
+		return apperror.BadRequest("min_ticket_amount no puede ser negativo", nil)
+	}
+	if p.MaxCashbackPerTx != nil && *p.MaxCashbackPerTx < 0 {
+		return apperror.BadRequest("max_cashback_per_tx no puede ser negativo", nil)
+	}
+	if p.MaxCashbackPerPeriod != nil && *p.MaxCashbackPerPeriod < 0 {
+		return apperror.BadRequest("max_cashback_per_period no puede ser negativo", nil)
+	}
+	if err := s.repo.UpdateProgram(ctx, p, setActive); err != nil {
+		return apperror.Internal("error al actualizar programa cashback", err)
 	}
 	return nil
 }

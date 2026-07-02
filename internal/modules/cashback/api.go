@@ -22,6 +22,7 @@ func (h *APIHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	{
 		programs.GET("", h.listPrograms)
 		programs.POST("", h.createProgram)
+		programs.PUT("/:id", h.updateProgram)
 		programs.POST("/:id/rewards", h.createReward)
 		programs.GET("/:id/rewards", h.listRewards)
 		programs.PUT("/:id/rewards/:reward_id", h.updateReward)
@@ -72,6 +73,41 @@ func (h *APIHandler) createProgram(c *gin.Context) {
 		"cashback_rate": respRate,
 		"active":        true,
 	})
+}
+
+// updateProgram updates cashback config (name, cashback_rate, active) plus the
+// loyalty options: expiry_days (FID-34), min_ticket_amount (FID-36),
+// max_cashback_per_tx y max_cashback_per_period (FID-37). Los límites vacíos
+// (omitidos/null) se guardan como NULL => sin límite.
+func (h *APIHandler) updateProgram(c *gin.Context) {
+	var req struct {
+		Name                 string   `json:"name"`
+		CashbackRate         float64  `json:"cashback_rate"`
+		Active               *bool    `json:"active"`
+		ExpiryDays           *int     `json:"expiry_days"`
+		MinTicketAmount      *float64 `json:"min_ticket_amount"`
+		MaxCashbackPerTx     *float64 `json:"max_cashback_per_tx"`
+		MaxCashbackPerPeriod *float64 `json:"max_cashback_per_period"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.BadRequest("datos invalidos", err))
+		return
+	}
+
+	p := &CashbackProgram{
+		CustomerSisfiID:      c.Param("id"),
+		Name:                 req.Name,
+		CashbackRate:         req.CashbackRate,
+		ExpiryDays:           req.ExpiryDays,
+		MinTicketAmount:      req.MinTicketAmount,
+		MaxCashbackPerTx:     req.MaxCashbackPerTx,
+		MaxCashbackPerPeriod: req.MaxCashbackPerPeriod,
+	}
+	if err := h.service.UpdateProgram(c.Request.Context(), p, req.Active); err != nil {
+		c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
 
 // --- Reward endpoints ---

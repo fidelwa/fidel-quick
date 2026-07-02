@@ -33,6 +33,28 @@ type mockRepo struct {
 	listAllRewardsFn          func(ctx context.Context, customerSisfiID string) ([]CashbackReward, error)
 	createRewardAdminFn       func(ctx context.Context, customerSisfiID string, r *CashbackReward) error
 	updateRewardAdminFn       func(ctx context.Context, r *CashbackReward) error
+	updateProgramFn           func(ctx context.Context, p *CashbackProgram, setActive *bool) error
+	expireBalanceFn           func(ctx context.Context, clientID, customerSisfiID string, expiryDays int) (float64, error)
+	sumCashbackInWindowFn     func(ctx context.Context, clientID, customerSisfiID string, windowDays int) (float64, error)
+}
+
+func (m *mockRepo) UpdateProgram(ctx context.Context, p *CashbackProgram, setActive *bool) error {
+	if m.updateProgramFn != nil {
+		return m.updateProgramFn(ctx, p, setActive)
+	}
+	return nil
+}
+func (m *mockRepo) ExpireBalance(ctx context.Context, clientID, customerSisfiID string, expiryDays int) (float64, error) {
+	if m.expireBalanceFn != nil {
+		return m.expireBalanceFn(ctx, clientID, customerSisfiID, expiryDays)
+	}
+	return 0, nil
+}
+func (m *mockRepo) SumCashbackInWindow(ctx context.Context, clientID, customerSisfiID string, windowDays int) (float64, error) {
+	if m.sumCashbackInWindowFn != nil {
+		return m.sumCashbackInWindowFn(ctx, clientID, customerSisfiID, windowDays)
+	}
+	return 0, nil
 }
 
 func (m *mockRepo) GetProgram(ctx context.Context, customerID string) (*CashbackProgram, error) {
@@ -547,4 +569,187 @@ func TestListPrograms(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, programs, 2)
+}
+
+// --- FID-36: ticket mínimo (cashback) ---
+
+func TestAddCashback_BelowMinTicket_NotCredited(t *testing.T) {
+	min := 200.0
+	credited := false
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*CashbackProgram, error) {
+			return &CashbackProgram{CustomerSisfiID: "cs-1", CashbackRate: 0.05, MinTicketAmount: &min}, nil
+		},
+		addCashbackTxFn: func(_ context.Context, _ *CashbackTransaction) (float64, error) {
+			credited = true
+			return 0, nil
+		},
+	}
+	svc := newTestService(repo, newMockCache())
+
+	_, err := svc.AddCashback(context.Background(), AddCashbackReq{ClientID: "c1", CustomerSisfiID: "cs-1", Amount: 100})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ticket mínimo")
+	assert.False(t, credited)
+}
+
+func TestAddCashback_AboveMinTicket_Credited(t *testing.T) {
+	min := 50.0
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*CashbackProgram, error) {
+			return &CashbackProgram{CustomerSisfiID: "cs-1", CashbackRate: 0.05, MinTicketAmount: &min}, nil
+		},
+		addCashbackTxFn: func(_ context.Context, tx *CashbackTransaction) (float64, error) { return tx.Amount, nil },
+	}
+	svc := newTestService(repo, newMockCache())
+
+	tx, err := svc.AddCashback(context.Background(), AddCashbackReq{ClientID: "c1", CustomerSisfiID: "cs-1", Amount: 100})
+
+	require.NoError(t, err)
+	assert.Equal(t, 5.0, tx.Amount)
+}
+
+// --- FID-37: cap por transacción ---
+
+func TestAddCashback_CapPerTx_Applied(t *testing.T) {
+	capTx := 3.0
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*CashbackProgram, error) {
+			return &CashbackProgram{CustomerSisfiID: "cs-1", CashbackRate: 0.05, MaxCashbackPerTx: &capTx}, nil
+		},
+		addCashbackTxFn: func(_ context.Context, tx *CashbackTransaction) (float64, error) { return tx.Amount, nil },
+	}
+	svc := newTestService(repo, newMockCache())
+
+	// 100 * 0.05 = 5.0, recortado a 3.0
+	tx, err := svc.AddCashback(context.Background(), AddCashbackReq{ClientID: "c1", CustomerSisfiID: "cs-1", Amount: 100})
+
+	require.NoError(t, err)
+	assert.Equal(t, 3.0, tx.Amount)
+}
+
+func TestAddCashback_CapPerTx_NotReached(t *testing.T) {
+	capTx := 100.0
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*CashbackProgram, error) {
+			return &CashbackProgram{CustomerSisfiID: "cs-1", CashbackRate: 0.05, MaxCashbackPerTx: &capTx}, nil
+		},
+		addCashbackTxFn: func(_ context.Context, tx *CashbackTransaction) (float64, error) { return tx.Amount, nil },
+	}
+	svc := newTestService(repo, newMockCache())
+
+	tx, err := svc.AddCashback(context.Background(), AddCashbackReq{ClientID: "c1", CustomerSisfiID: "cs-1", Amount: 100})
+
+	require.NoError(t, err)
+	assert.Equal(t, 5.0, tx.Amount) // por debajo del cap, sin cambios
+}
+
+// --- FID-37: cap por periodo ---
+
+func TestAddCashback_CapPerPeriod_TrimsRemaining(t *testing.T) {
+	capPeriod := 10.0
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*CashbackProgram, error) {
+			return &CashbackProgram{CustomerSisfiID: "cs-1", CashbackRate: 0.05, MaxCashbackPerPeriod: &capPeriod}, nil
+		},
+		sumCashbackInWindowFn: func(_ context.Context, _, _ string, _ int) (float64, error) {
+			return 8.0, nil // ya acumuló 8; quedan 2
+		},
+		addCashbackTxFn: func(_ context.Context, tx *CashbackTransaction) (float64, error) { return tx.Amount, nil },
+	}
+	svc := newTestService(repo, newMockCache())
+
+	// 100 * 0.05 = 5.0, pero solo quedan 2.0 en el periodo
+	tx, err := svc.AddCashback(context.Background(), AddCashbackReq{ClientID: "c1", CustomerSisfiID: "cs-1", Amount: 100})
+
+	require.NoError(t, err)
+	assert.Equal(t, 2.0, tx.Amount)
+}
+
+func TestAddCashback_CapPerPeriod_Exhausted_NotCredited(t *testing.T) {
+	capPeriod := 10.0
+	credited := false
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*CashbackProgram, error) {
+			return &CashbackProgram{CustomerSisfiID: "cs-1", CashbackRate: 0.05, MaxCashbackPerPeriod: &capPeriod}, nil
+		},
+		sumCashbackInWindowFn: func(_ context.Context, _, _ string, _ int) (float64, error) {
+			return 10.0, nil // periodo agotado
+		},
+		addCashbackTxFn: func(_ context.Context, _ *CashbackTransaction) (float64, error) {
+			credited = true
+			return 0, nil
+		},
+	}
+	svc := newTestService(repo, newMockCache())
+
+	_, err := svc.AddCashback(context.Background(), AddCashbackReq{ClientID: "c1", CustomerSisfiID: "cs-1", Amount: 100})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "máximo de cashback del periodo")
+	assert.False(t, credited)
+}
+
+func TestAddCashback_NoCaps_UnchangedBehavior(t *testing.T) {
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*CashbackProgram, error) {
+			return &CashbackProgram{CustomerSisfiID: "cs-1", CashbackRate: 0.05}, nil // sin caps ni mínimo
+		},
+		sumCashbackInWindowFn: func(_ context.Context, _, _ string, _ int) (float64, error) {
+			t.Fatal("no debe consultar la ventana sin cap por periodo")
+			return 0, nil
+		},
+		addCashbackTxFn: func(_ context.Context, tx *CashbackTransaction) (float64, error) { return tx.Amount, nil },
+	}
+	svc := newTestService(repo, newMockCache())
+
+	tx, err := svc.AddCashback(context.Background(), AddCashbackReq{ClientID: "c1", CustomerSisfiID: "cs-1", Amount: 100})
+
+	require.NoError(t, err)
+	assert.Equal(t, 5.0, tx.Amount)
+}
+
+// --- FID-34: expiración lazy (cashback) ---
+
+func TestCheckBalance_ExpiryConfigured_UsesExpireSweep(t *testing.T) {
+	days := 15
+	called := false
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*CashbackProgram, error) {
+			return &CashbackProgram{CustomerSisfiID: "cs-1", CashbackRate: 0.05, ExpiryDays: &days}, nil
+		},
+		expireBalanceFn: func(_ context.Context, _, _ string, expiryDays int) (float64, error) {
+			called = true
+			assert.Equal(t, 15, expiryDays)
+			return 12.5, nil
+		},
+		getBalanceFn: func(_ context.Context, _, _ string) (float64, error) { return 99.0, nil },
+	}
+	svc := newTestService(repo, newMockCache())
+
+	bal, err := svc.CheckBalance(context.Background(), "c1", "cs-1")
+
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Equal(t, 12.5, bal)
+}
+
+func TestCheckBalance_NoExpiry_UnchangedBehavior(t *testing.T) {
+	repo := &mockRepo{
+		getProgramFn: func(_ context.Context, _ string) (*CashbackProgram, error) {
+			return &CashbackProgram{CustomerSisfiID: "cs-1", CashbackRate: 0.05}, nil // ExpiryDays nil
+		},
+		expireBalanceFn: func(_ context.Context, _, _ string, _ int) (float64, error) {
+			t.Fatal("no debe expirar cuando expiry_days es nil")
+			return 0, nil
+		},
+		getBalanceFn: func(_ context.Context, _, _ string) (float64, error) { return 42.0, nil },
+	}
+	svc := newTestService(repo, newMockCache())
+
+	bal, err := svc.CheckBalance(context.Background(), "c1", "cs-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, 42.0, bal)
 }
