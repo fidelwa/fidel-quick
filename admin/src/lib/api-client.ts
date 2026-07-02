@@ -107,13 +107,17 @@ export const updateProgram = (
 export const getRewards = (programId: string) =>
   request<Reward[]>(`/programs/${programId}/rewards`)
 
-export const createReward = (programId: string, data: { name: string; description: string; points_cost: number }) =>
+export const createReward = (
+  programId: string,
+  // FID-38: stock_total opcional; omitido/null = ilimitado.
+  data: { name: string; description: string; points_cost: number; stock_total?: number | null },
+) =>
   request<Reward>(`/programs/${programId}/rewards`, {
     method: "POST",
     body: JSON.stringify(data),
   })
 
-export const updateReward = (programId: string, rewardId: string, data: Partial<Pick<Reward, "name" | "description" | "points_cost" | "active">>) =>
+export const updateReward = (programId: string, rewardId: string, data: Partial<Pick<Reward, "name" | "description" | "points_cost" | "active" | "stock_total">>) =>
   request<Reward>(`/programs/${programId}/rewards/${rewardId}`, {
     method: "PUT",
     body: JSON.stringify(data),
@@ -153,13 +157,17 @@ export const updateCashbackProgram = (
 export const getCashbackRewards = (programId: string) =>
   request<CashbackReward[]>(`/cashback-programs/${programId}/rewards`)
 
-export const createCashbackReward = (programId: string, data: { name: string; description: string; cost: number }) =>
+export const createCashbackReward = (
+  programId: string,
+  // FID-38: stock_total opcional; omitido/null = ilimitado.
+  data: { name: string; description: string; cost: number; stock_total?: number | null },
+) =>
   request<CashbackReward>(`/cashback-programs/${programId}/rewards`, {
     method: "POST",
     body: JSON.stringify(data),
   })
 
-export const updateCashbackReward = (programId: string, rewardId: string, data: Partial<Pick<CashbackReward, "name" | "description" | "cost" | "active">>) =>
+export const updateCashbackReward = (programId: string, rewardId: string, data: Partial<Pick<CashbackReward, "name" | "description" | "cost" | "active" | "stock_total">>) =>
   request<CashbackReward>(`/cashback-programs/${programId}/rewards/${rewardId}`, {
     method: "PUT",
     body: JSON.stringify(data),
