@@ -17,8 +17,11 @@ export function usePushcardConfig(customerId: string) {
 export function useUpsertPushcardConfig(customerSisfiID: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: { card_slots: number; reward_on_complete?: string }) =>
-      upsertPushcardConfig(customerSisfiID, data),
+    mutationFn: (data: {
+      card_slots: number
+      reward_on_complete?: string
+      card_expiry_days?: number | null
+    }) => upsertPushcardConfig(customerSisfiID, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pushcard-config"] })
     },

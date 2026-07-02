@@ -53,6 +53,15 @@ type AdminSummary struct {
 	HostedDomain *string `json:"hosted_domain,omitempty"`
 }
 
+// MeResponse is the payload of GET /api/v1/auth/me. It embeds AdminSummary so
+// its fields stay flat in the JSON, and adds the feature flags resolved for the
+// caller's customer (map of flag key → enabled) for UI gating. Flags is omitted
+// when no flag resolver is wired.
+type MeResponse struct {
+	AdminSummary
+	Flags map[string]bool `json:"flags,omitempty"`
+}
+
 type GoogleOnboardingRequest struct {
 	GoogleToken string `json:"google_token" binding:"required"`
 	Name        string `json:"name" binding:"required"`
@@ -67,4 +76,26 @@ type GoogleLoginRequest struct {
 // LinkGoogleRequest binds the body of POST /api/v1/auth/link/google.
 type LinkGoogleRequest struct {
 	GoogleToken string `json:"google_token" binding:"required"`
+}
+
+// ForgotPasswordRequest binds the body of POST /api/v1/auth/forgot-password.
+type ForgotPasswordRequest struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
+// ResetPasswordRequest binds the body of POST /api/v1/auth/reset-password.
+type ResetPasswordRequest struct {
+	Token       string `json:"token" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required,min=8"`
+}
+
+// PasswordResetToken mirrors a row in password_reset_tokens. Only token_hash
+// is persisted — the plaintext token lives only in the emailed link.
+type PasswordResetToken struct {
+	ID        string
+	AdminID   string
+	TokenHash string
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+	CreatedAt time.Time
 }

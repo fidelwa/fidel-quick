@@ -124,6 +124,17 @@ func (f *fakeRepo) CompleteCard(_ context.Context, cardID string) error {
 	return nil
 }
 
+func (f *fakeRepo) CancelCard(_ context.Context, cardID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.cards[cardID]
+	if !ok || c.Status != StatusOpen {
+		return nil
+	}
+	c.Status = StatusCancelled
+	return nil
+}
+
 func (f *fakeRepo) MarkRedeemed(_ context.Context, cardID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -400,6 +411,111 @@ func TestRequestRedemption_WithCompletedCardReturnsCode(t *testing.T) {
 	}
 	if len(code) != 6 {
 		t.Fatalf("want 6-char code, got %d (%q)", len(code), code)
+	}
+}
+
+// backdateOpenCard shifts the created_at of the client's open card into the
+// past so expiry logic can be exercised deterministically.
+func (f *fakeRepo) backdateOpenCard(customerSisfiID, clientID string, age time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.cards {
+		if c.CustomerSisfiID == customerSisfiID && c.ClientID == clientID && c.Status == StatusOpen {
+			c.CreatedAt = time.Now().Add(-age)
+		}
+	}
+}
+
+func intPtr(n int) *int { return &n }
+
+func TestUpsertConfig_RejectsZeroExpiry(t *testing.T) {
+	svc, _ := newTestService()
+	err := svc.UpsertConfig(context.Background(), &Config{
+		CustomerSisfiID: "cs-1", CardSlots: 5, CardExpiryDays: intPtr(0),
+	})
+	if err == nil {
+		t.Fatalf("expected error for card_expiry_days=0")
+	}
+}
+
+func TestUpsertConfig_AcceptsExpiry(t *testing.T) {
+	svc, repo := newTestService()
+	err := svc.UpsertConfig(context.Background(), &Config{
+		CustomerSisfiID: "cs-1", CardSlots: 5, CardExpiryDays: intPtr(30),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, _ := repo.GetConfigByID(context.Background(), "cs-1")
+	if got.CardExpiryDays == nil || *got.CardExpiryDays != 30 {
+		t.Fatalf("expected persisted expiry=30, got %v", got.CardExpiryDays)
+	}
+}
+
+func TestAddStamp_ExpiresStaleCardAndOpensFresh(t *testing.T) {
+	svc, repo := newTestService()
+	cfg := repo.seedConfig("cs-1", 5)
+	cfg.CardExpiryDays = intPtr(7)
+	ctx := context.Background()
+
+	// First stamp opens a card.
+	r1, err := svc.AddStamp(ctx, AddStampReq{CustomerSisfiID: "cs-1", ClientID: "c", CollaboratorID: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstCardID := r1.Card.ID
+
+	// Age the card past its expiry window.
+	repo.backdateOpenCard("cs-1", "c", 8*24*time.Hour)
+
+	// GetProgress should now report no open card (the stale one was cancelled).
+	prog, err := svc.GetProgress(ctx, "cs-1", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prog.HasOpenCard {
+		t.Fatalf("expected stale card to be expired, still open")
+	}
+	if old, _ := repo.GetCard(ctx, firstCardID); old.Status != StatusCancelled {
+		t.Fatalf("expected first card cancelled, got %s", old.Status)
+	}
+
+	// Next stamp opens a fresh card with count reset to 1.
+	r2, err := svc.AddStamp(ctx, AddStampReq{CustomerSisfiID: "cs-1", ClientID: "c", CollaboratorID: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Card.ID == firstCardID {
+		t.Fatalf("expected a new card, reused expired one")
+	}
+	if r2.StampsCount != 1 {
+		t.Fatalf("expected fresh card with 1 stamp, got %d", r2.StampsCount)
+	}
+}
+
+func TestAddStamp_NoExpiryKeepsCard(t *testing.T) {
+	svc, repo := newTestService()
+	repo.seedConfig("cs-1", 5) // CardExpiryDays nil = no expiration (default)
+	ctx := context.Background()
+
+	r1, err := svc.AddStamp(ctx, AddStampReq{CustomerSisfiID: "cs-1", ClientID: "c", CollaboratorID: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstCardID := r1.Card.ID
+
+	// Even a very old card must survive when expiry is disabled.
+	repo.backdateOpenCard("cs-1", "c", 365*24*time.Hour)
+
+	r2, err := svc.AddStamp(ctx, AddStampReq{CustomerSisfiID: "cs-1", ClientID: "c", CollaboratorID: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Card.ID != firstCardID {
+		t.Fatalf("expected same card when expiry disabled")
+	}
+	if r2.StampsCount != 2 {
+		t.Fatalf("expected 2 stamps on same card, got %d", r2.StampsCount)
 	}
 }
 

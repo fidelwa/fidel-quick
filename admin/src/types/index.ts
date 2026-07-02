@@ -39,6 +39,10 @@ export interface Program {
   name: string
   points_ratio: number
   active: boolean
+  // FID-34: días para que venzan los puntos. null = sin vencimiento.
+  expiry_days: number | null
+  // FID-36: monto mínimo de compra para acreditar. null = sin mínimo.
+  min_ticket_amount: number | null
 }
 
 export interface Reward {
@@ -57,6 +61,14 @@ export interface CashbackProgram {
   name: string
   cashback_rate: number
   active: boolean
+  // FID-34: días para que venza el saldo. null = sin vencimiento.
+  expiry_days: number | null
+  // FID-36: monto mínimo de compra para acreditar. null = sin mínimo.
+  min_ticket_amount: number | null
+  // FID-37: techo de cashback por transacción. null = sin cap.
+  max_cashback_per_tx: number | null
+  // FID-37: techo de cashback acumulado por periodo. null = sin cap.
+  max_cashback_per_period: number | null
 }
 
 export interface CashbackReward {
@@ -151,6 +163,8 @@ export interface PushcardConfig {
   card_slots: number
   reward_on_complete: string
   active: boolean
+  /** Días de vida de una tarjeta desde su creación; null = sin expiración. */
+  card_expiry_days: number | null
 }
 
 export interface PushcardCard {
@@ -192,6 +206,34 @@ export interface AdminSummary {
   email: string
   customer_id: string
   google_email?: string | null
+}
+
+// MeResponse mirrors GET /api/v1/auth/me: the admin summary plus the feature
+// flags resolved for the caller's customer (map of flag key → enabled) for UI
+// gating. `flags` may be absent when no flag resolver is wired server-side.
+export interface MeResponse extends AdminSummary {
+  flags?: Record<string, boolean>
+}
+
+// FeatureFlag mirrors the admin feature-flag definition
+// (GET/PUT /api/v1/admin/flags).
+export interface FeatureFlag {
+  key: string
+  enabled_globally: boolean
+  customer_overrides: Record<string, boolean>
+  default_value: boolean
+  description?: string
+  created_at: string
+  updated_at: string
+}
+
+// FeatureFlagUpdate is the PUT /api/v1/admin/flags/:key body. Omitted fields
+// are left unchanged (upsert semantics).
+export interface FeatureFlagUpdate {
+  enabled_globally?: boolean
+  customer_overrides?: Record<string, boolean>
+  default_value?: boolean
+  description?: string
 }
 
 export interface AuthResponse {

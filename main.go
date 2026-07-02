@@ -10,6 +10,7 @@ import (
 	"github.com/theluisbolivar/fidel-quick/api"
 	"github.com/theluisbolivar/fidel-quick/internal/admin"
 	"github.com/theluisbolivar/fidel-quick/internal/config"
+	"github.com/theluisbolivar/fidel-quick/internal/featureflags"
 	"github.com/theluisbolivar/fidel-quick/internal/flow"
 	"github.com/theluisbolivar/fidel-quick/internal/landing"
 	"github.com/theluisbolivar/fidel-quick/internal/loyalty"
@@ -21,6 +22,7 @@ import (
 	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/cache"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/db"
+	"github.com/theluisbolivar/fidel-quick/internal/platform/email"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/logger"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/storage"
 	"github.com/theluisbolivar/fidel-quick/internal/platform/whatsapp"
@@ -147,7 +149,20 @@ func main() {
 		log.Warn("GOOGLE_CLIENT_ID not set — Google login/signup disabled")
 	}
 	adminService := admin.NewService(adminRepo, cfg.JWTSecret, googleVerifier)
-	adminAPI := admin.NewAPIHandler(adminService)
+
+	// Password reset (FID-16): email sender + reset link base URL.
+	emailSender := email.NewSender(cfg.EmailProvider, cfg.EmailFrom, log)
+	adminService.WithPasswordReset(emailSender, cfg.AppURL, log)
+	log.Info("password reset enabled", "email_provider", cfg.EmailProvider, "app_url", cfg.AppURL)
+
+	// Feature flags (FID-26) — resolve override>global>default with a short
+	// Redis cache; exposed to admins for toggling and to the SPA via /auth/me.
+	ffRepo := featureflags.NewPostgresRepository(database)
+	ffCache := featureflags.NewRedisCache(redisClient, log)
+	ffService := featureflags.NewService(ffRepo, ffCache, log)
+	ffAPI := featureflags.NewAPIHandler(ffService)
+
+	adminAPI := admin.NewAPIHandler(adminService).WithFlags(ffService)
 
 	// Onboarding
 	onboardingRepo := onboarding.NewRepository(database)
@@ -161,7 +176,7 @@ func main() {
 	landingHandler := landing.NewHandler(resolverRepo, log, cfg.WhatsAppDisplayPhone)
 
 	// Router (API + landing + webhook)
-	r := api.SetupRouter(cfg.BearerToken, cfg.JWTSecret, landingHandler, webhookHandler, registry, adminAPI, onboardingAPI, sisfiAPI, database, redisClient, adminFS(), log, cfg.IsDevelopment())
+	r := api.SetupRouter(cfg.BearerToken, cfg.JWTSecret, landingHandler, webhookHandler, registry, adminAPI, onboardingAPI, sisfiAPI, ffAPI, database, redisClient, adminFS(), log, cfg.IsDevelopment())
 
 	log.Info("server starting", "port", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
@@ -202,6 +217,7 @@ func (a *photoAdapter) ProcessPhoto(ctx context.Context, imageURL string) (*flow
 		StorageURL: result.StorageURL,
 		Amount:     result.Amount,
 		Currency:   result.Currency,
+		Invoice:    result.Invoice,
 	}, nil
 }
 

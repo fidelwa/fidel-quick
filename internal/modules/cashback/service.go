@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
+	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
 )
 
 const (
@@ -37,9 +38,24 @@ func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*Cashbac
 		return nil, fmt.Errorf("get cashback program: %w", err)
 	}
 
+	// FID-36: ticket mínimo. nil = sin mínimo.
+	if program.MinTicketAmount != nil && req.Amount < *program.MinTicketAmount {
+		return nil, fmt.Errorf("monto de compra ($%.2f) menor al ticket mínimo ($%.2f); no se acredita cashback", req.Amount, *program.MinTicketAmount)
+	}
+
 	cashbackAmount := math.Floor(req.Amount*program.CashbackRate*100) / 100
 	if cashbackAmount <= 0 {
 		return nil, fmt.Errorf("monto insuficiente para acumular cashback (rate: %.2f%%)", program.CashbackRate*100)
+	}
+
+	// FID-37: caps de cashback. nil = sin cap.
+	// Techo por transacción (depende solo del monto de la compra, sin carrera).
+	if program.MaxCashbackPerTx != nil && cashbackAmount > *program.MaxCashbackPerTx {
+		cashbackAmount = *program.MaxCashbackPerTx
+	}
+
+	if cashbackAmount <= 0 {
+		return nil, fmt.Errorf("monto insuficiente para acumular cashback tras aplicar límites")
 	}
 
 	correctableUntil := time.Now().Add(correctionWindow)
@@ -56,10 +72,44 @@ func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*Cashbac
 		CorrectableUntil: &correctableUntil,
 	}
 
+	// FID-37 (LG-2): techo por periodo aplicado de forma ATÓMICA dentro de
+	// AddCashbackTx. Pasamos el cap y la ventana (expiry_days o 30 días por
+	// defecto); la lectura de la suma acumulada y el clamp ocurren en la misma
+	// transacción que el insert, evitando la carrera de requests concurrentes.
+	if program.MaxCashbackPerPeriod != nil {
+		windowDays := 30
+		if program.ExpiryDays != nil {
+			windowDays = *program.ExpiryDays
+		}
+		tx.PeriodCap = program.MaxCashbackPerPeriod
+		tx.PeriodWindowDays = windowDays
+	}
+
+	// Anti-fraude (FID-33): persistir el extract y calcular el hash de dedup.
+	if req.Invoice != nil {
+		fp, err := ai.ComputeFingerprint(req.Invoice)
+		if err != nil {
+			return nil, fmt.Errorf("compute receipt fingerprint: %w", err)
+		}
+		tx.ReceiptData = fp.Data
+		tx.ReceiptHash = fp.Hash
+		tx.ReceiptHashFields = fp.HashFields
+		tx.ReceiptConfident = fp.Confident
+	}
+
 	newBalance, err := s.repo.AddCashbackTx(ctx, tx)
 	if err != nil {
+		if errors.Is(err, ErrDuplicateReceipt) {
+			return nil, apperror.Conflict("ticket ya registrado", err)
+		}
+		if errors.Is(err, ErrPeriodCapExhausted) {
+			return nil, fmt.Errorf("se alcanzó el máximo de cashback del periodo ($%.2f)", *program.MaxCashbackPerPeriod)
+		}
 		return nil, fmt.Errorf("add cashback tx: %w", err)
 	}
+
+	// El monto pudo recortarse dentro de la tx por el cap por periodo.
+	cashbackAmount = tx.Amount
 
 	tx.BalanceAfter = newBalance
 
@@ -75,7 +125,19 @@ func (s *Service) AddCashback(ctx context.Context, req AddCashbackReq) (*Cashbac
 }
 
 // CheckBalance returns the current cashback balance for a client.
+//
+// FID-34 (expiración lazy): si el programa tiene expiry_days configurado, expira
+// de forma perezosa las acreditaciones vencidas antes de devolver el saldo.
+// nil = sin vencimiento, comportamiento intacto.
 func (s *Service) CheckBalance(ctx context.Context, clientID, customerSisfiID string) (float64, error) {
+	program, err := s.repo.GetProgramByID(ctx, customerSisfiID)
+	if err == nil && program.ExpiryDays != nil {
+		if balance, expErr := s.repo.ExpireBalance(ctx, clientID, customerSisfiID, *program.ExpiryDays); expErr == nil {
+			return balance, nil
+		} else {
+			s.log.Error("expire cashback failed, returning stored balance", "error", expErr, "client_id", clientID)
+		}
+	}
 	return s.repo.GetBalance(ctx, clientID, customerSisfiID)
 }
 
@@ -364,6 +426,41 @@ func (s *Service) CreateProgram(ctx context.Context, p *CashbackProgram) error {
 	}
 	if err := s.repo.CreateProgram(ctx, p); err != nil {
 		return apperror.Internal("error al crear programa cashback", err)
+	}
+	return nil
+}
+
+// UpdateProgram updates an existing cashback program's name, cashback_rate and
+// the loyalty config options (expiry_days, min_ticket_amount, max_cashback_per_tx,
+// max_cashback_per_period). cashback_rate se normaliza igual que en CreateProgram
+// (acepta porcentaje 0-100 o fracción 0-1). setActive nil deja el flag intacto.
+func (s *Service) UpdateProgram(ctx context.Context, p *CashbackProgram, setActive *bool) error {
+	if p.CustomerSisfiID == "" {
+		return apperror.BadRequest("id de programa requerido", nil)
+	}
+	if p.CashbackRate > 1 {
+		p.CashbackRate = p.CashbackRate / 100
+	}
+	if p.CashbackRate < 0 || p.CashbackRate > 1 {
+		return apperror.BadRequest("cashback_rate debe estar entre 0 y 1 (o entre 0 y 100 si es porcentaje)", nil)
+	}
+	if p.ExpiryDays != nil && *p.ExpiryDays <= 0 {
+		return apperror.BadRequest("expiry_days debe ser mayor a 0", nil)
+	}
+	if p.MinTicketAmount != nil && *p.MinTicketAmount < 0 {
+		return apperror.BadRequest("min_ticket_amount no puede ser negativo", nil)
+	}
+	// FID-37 (LG-4): un cap de 0 envenenaría el programa (bloquearía todo el
+	// cashback). "Sin cap" se representa con null (campo vacío en el form), no
+	// con 0. Por eso un cap no-nil debe ser estrictamente > 0.
+	if p.MaxCashbackPerTx != nil && *p.MaxCashbackPerTx <= 0 {
+		return apperror.BadRequest("max_cashback_per_tx debe ser mayor a 0 (vacío = sin límite)", nil)
+	}
+	if p.MaxCashbackPerPeriod != nil && *p.MaxCashbackPerPeriod <= 0 {
+		return apperror.BadRequest("max_cashback_per_period debe ser mayor a 0 (vacío = sin límite)", nil)
+	}
+	if err := s.repo.UpdateProgram(ctx, p, setActive); err != nil {
+		return apperror.Internal("error al actualizar programa cashback", err)
 	}
 	return nil
 }

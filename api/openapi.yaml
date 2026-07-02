@@ -82,6 +82,11 @@ components:
 
     UpdateProgramRequest:
       type: object
+      description: >
+        Actualiza un programa earn_burn. Los campos de config (expiry_days,
+        min_ticket_amount) son FULL-REPLACE: si se omiten llegan como null y la
+        columna se limpia (sin límite). El cliente debe enviar SIEMPRE todos los
+        campos de config con su valor actual, incluso al alternar `active`.
       properties:
         name:
           type: string
@@ -89,6 +94,83 @@ components:
           type: integer
         active:
           type: boolean
+        expiry_days:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: >
+            FID-34. Días tras los cuales los puntos de una acreditación vencen.
+            null = sin vencimiento. Full-replace: omitir el campo lo limpia.
+          example: 90
+        min_ticket_amount:
+          type: number
+          format: double
+          nullable: true
+          minimum: 0
+          description: >
+            FID-36. Monto mínimo de compra para acreditar puntos. null = sin
+            mínimo. Full-replace: omitir el campo lo limpia.
+          example: 100
+
+    # --- Cashback programs ---
+    UpdateCashbackProgramRequest:
+      type: object
+      description: >
+        Actualiza un programa de cashback. Los campos de config (expiry_days,
+        min_ticket_amount, max_cashback_per_tx, max_cashback_per_period) son
+        FULL-REPLACE: si se omiten llegan como null y la columna se limpia (sin
+        límite). El cliente debe enviar SIEMPRE todos los campos de config con su
+        valor actual, incluso al alternar `active`.
+      properties:
+        name:
+          type: string
+        cashback_rate:
+          type: number
+          format: double
+          description: >
+            Tasa de cashback. Acepta fracción (0-1, ej. 0.05) o porcentaje (0-100,
+            ej. 5, que se normaliza a 0.05). Un valor <= 0 preserva la tasa previa.
+          example: 0.05
+        active:
+          type: boolean
+        expiry_days:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: >
+            FID-34. Días tras los cuales el saldo de una acreditación vence.
+            null = sin vencimiento. Full-replace: omitir el campo lo limpia.
+          example: 90
+        min_ticket_amount:
+          type: number
+          format: double
+          nullable: true
+          minimum: 0
+          description: >
+            FID-36. Monto mínimo de compra para acreditar cashback. null = sin
+            mínimo. Full-replace: omitir el campo lo limpia.
+          example: 100
+        max_cashback_per_tx:
+          type: number
+          format: double
+          nullable: true
+          exclusiveMinimum: 0
+          description: >
+            FID-37. Techo de cashback por transacción. null = sin cap. Si se
+            especifica debe ser > 0 (un 0 se rechaza; "sin cap" se expresa con
+            null). Full-replace: omitir el campo lo limpia.
+          example: 50
+        max_cashback_per_period:
+          type: number
+          format: double
+          nullable: true
+          exclusiveMinimum: 0
+          description: >
+            FID-37. Techo de cashback acumulado en la ventana (expiry_days o 30
+            días por defecto). null = sin cap. Si se especifica debe ser > 0. El
+            techo se aplica de forma atómica al acreditar. Full-replace: omitir el
+            campo lo limpia.
+          example: 500
 
     # --- Rewards ---
     Reward:
@@ -367,6 +449,32 @@ components:
         google_token:
           type: string
 
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+
+    ResetPasswordRequest:
+      type: object
+      required: [token, new_password]
+      properties:
+        token:
+          type: string
+          description: Token del enlace enviado por email
+        new_password:
+          type: string
+          minLength: 8
+
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
     # --- Feedback ---
     Feedback:
       type: object
@@ -527,6 +635,80 @@ paths:
                 $ref: "#/components/schemas/Error"
         "409":
           description: Email ya registrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Solicitar restablecimiento de contraseña
+      description: |
+        Endpoint público. Si el email está registrado, envía un correo con un
+        enlace de restablecimiento (token de un solo uso, válido 1 hora).
+        Responde **200 siempre** — incluso si el email no existe — para no
+        revelar qué correos están registrados. Rate limit: 5/h por email.
+      operationId: forgotPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: Solicitud aceptada (mensaje neutro)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Email faltante o inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Demasiadas solicitudes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Restablecer contraseña con token
+      description: |
+        Endpoint público. Valida el token del enlace (existe, no expirado, no
+        usado), fija la nueva contraseña (min 8 caracteres) y marca el token
+        como usado — invalidando además cualquier otro token pendiente del
+        admin. Rate limit: 10/h por IP.
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Contraseña actualizada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Token inválido/expirado/usado o contraseña muy corta
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Demasiadas solicitudes
           content:
             application/json:
               schema:
@@ -752,6 +934,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatusResponse"
+
+  /cashback-programs/{id}:
+    put:
+      tags: [Programs]
+      summary: Actualizar un programa de cashback
+      description: >
+        Actualiza name, cashback_rate, active y los límites de config (FID-34/36/37).
+        Los cuatro límites (expiry_days, min_ticket_amount, max_cashback_per_tx,
+        max_cashback_per_period) son FULL-REPLACE: un campo omitido llega como null
+        y limpia la columna. Envía SIEMPRE todos los campos de config actuales,
+        incluso al solo alternar `active`. Los caps, si se especifican, deben ser > 0.
+      operationId: updateCashbackProgram
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCashbackProgramRequest"
+      responses:
+        "200":
+          description: Programa de cashback actualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          description: Datos inválidos (p.ej. un cap <= 0)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   # ========== Rewards ==========
   /programs/{id}/rewards:

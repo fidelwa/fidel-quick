@@ -1,23 +1,40 @@
 package admin
 
 import (
+	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
+	"github.com/theluisbolivar/fidel-quick/internal/platform/email"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/text/unicode/norm"
 )
+
+// resetTokenTTL is how long a password reset link stays valid.
+const resetTokenTTL = time.Hour
 
 type Service struct {
 	repo      Repository
 	jwtSecret []byte
 	verifier  GoogleVerifier
+
+	// Password reset (FID-16). Configured via WithPasswordReset; when unset
+	// the forgot/reset endpoints return a "not configured" error.
+	emailSender email.Sender
+	appURL      string
+	forgotLimit RateLimiter // keyed by email
+	resetLimit  RateLimiter // keyed by client IP
+	log         *slog.Logger
 }
 
 // NewService wires the repository, JWT signing secret, and Google verifier.
@@ -25,10 +42,27 @@ type Service struct {
 // service methods will then return a "google login not configured" error.
 func NewService(repo Repository, jwtSecret string, verifier GoogleVerifier) *Service {
 	return &Service{
-		repo:      repo,
-		jwtSecret: []byte(jwtSecret),
-		verifier:  verifier,
+		repo:        repo,
+		jwtSecret:   []byte(jwtSecret),
+		verifier:    verifier,
+		forgotLimit: noopRateLimiter{},
+		resetLimit:  noopRateLimiter{},
+		log:         slog.Default(),
 	}
+}
+
+// WithPasswordReset enables the forgot/reset-password flow. appURL is the
+// public admin base URL used to build the reset link
+// (<appURL>/reset-password?token=...). A nil logger falls back to slog.Default.
+func (s *Service) WithPasswordReset(sender email.Sender, appURL string, log *slog.Logger) *Service {
+	s.emailSender = sender
+	s.appURL = strings.TrimRight(appURL, "/")
+	s.forgotLimit = NewMemoryRateLimiter(5, time.Hour)
+	s.resetLimit = NewMemoryRateLimiter(10, time.Hour)
+	if log != nil {
+		s.log = log
+	}
+	return s
 }
 
 func (s *Service) Login(email, password string) (*AuthResponse, error) {
@@ -42,6 +76,117 @@ func (s *Service) Login(email, password string) (*AuthResponse, error) {
 	}
 
 	return s.makeAuthResponse(admin)
+}
+
+// ForgotPassword issues a password reset token for the given email and emails
+// the reset link. To avoid leaking which emails are registered, it NEVER
+// reports whether the email exists — callers should always return 200. A
+// non-nil error means an infrastructure failure (rate limit, config), not
+// "email unknown".
+//
+// The plaintext token (32 random bytes, base64url) travels only in the link;
+// only its SHA-256 hash is persisted.
+func (s *Service) ForgotPassword(ctx context.Context, emailAddr string) error {
+	if s.emailSender == nil {
+		return apperror.Internal("password reset not configured", nil)
+	}
+
+	emailAddr = strings.TrimSpace(strings.ToLower(emailAddr))
+	if !s.forgotLimit.Allow(emailAddr) {
+		return apperror.TooManyRequests("demasiadas solicitudes, intenta más tarde", nil)
+	}
+
+	admin, err := s.repo.GetByEmail(emailAddr)
+	if err != nil {
+		// Unknown email (or lookup miss): swallow so we don't enumerate.
+		// Only surface unexpected internal errors.
+		var appErr *apperror.AppError
+		if errors.As(err, &appErr) && appErr.HTTPStatus == 404 {
+			s.log.Info("forgot-password for unknown email", "email", emailAddr)
+			return nil
+		}
+		return err
+	}
+
+	plain, hash, err := generateResetToken()
+	if err != nil {
+		return apperror.Internal("failed to generate reset token", err)
+	}
+
+	if err := s.repo.CreatePasswordResetToken(admin.ID, hash, time.Now().Add(resetTokenTTL)); err != nil {
+		return err
+	}
+
+	link := s.appURL + "/reset-password?token=" + plain
+	body := fmt.Sprintf(
+		"Recibimos una solicitud para restablecer tu contraseña.\n\n"+
+			"Abre este enlace para elegir una nueva (válido por 1 hora):\n%s\n\n"+
+			"Si no fuiste tú, ignora este correo.",
+		link,
+	)
+	if err := s.emailSender.Send(ctx, email.Message{
+		To:      admin.Email,
+		Subject: "Restablece tu contraseña de Fidel",
+		Body:    body,
+	}); err != nil {
+		return apperror.Internal("failed to send reset email", err)
+	}
+
+	return nil
+}
+
+// ResetPassword validates a reset token and, if valid (exists, not expired,
+// not used), sets the admin's new password and invalidates outstanding tokens
+// — all atomically. clientIP is used only for rate limiting.
+func (s *Service) ResetPassword(clientIP, token, newPassword string) error {
+	if s.emailSender == nil {
+		return apperror.Internal("password reset not configured", nil)
+	}
+	if !s.resetLimit.Allow(clientIP) {
+		return apperror.TooManyRequests("demasiadas solicitudes, intenta más tarde", nil)
+	}
+	if len(newPassword) < 8 {
+		return apperror.BadRequest("la contraseña debe tener al menos 8 caracteres", nil)
+	}
+
+	hash := hashResetToken(token)
+	row, err := s.repo.GetPasswordResetToken(hash)
+	if err != nil {
+		var appErr *apperror.AppError
+		if errors.As(err, &appErr) && appErr.HTTPStatus == 404 {
+			return apperror.BadRequest("token inválido o expirado", nil)
+		}
+		return err
+	}
+	if row.UsedAt != nil {
+		return apperror.BadRequest("token inválido o expirado", nil)
+	}
+	if time.Now().After(row.ExpiresAt) {
+		return apperror.BadRequest("token inválido o expirado", nil)
+	}
+
+	pwHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return apperror.Internal("failed to hash password", err)
+	}
+
+	return s.repo.ConsumePasswordReset(row.ID, row.AdminID, string(pwHash))
+}
+
+// generateResetToken returns a URL-safe plaintext token and its SHA-256 hash
+// (hex). 32 random bytes → 256 bits of entropy.
+func generateResetToken() (plain, hash string, err error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", "", err
+	}
+	plain = base64.RawURLEncoding.EncodeToString(buf)
+	return plain, hashResetToken(plain), nil
+}
+
+func hashResetToken(plain string) string {
+	sum := sha256.Sum256([]byte(plain))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *Service) Register(email, password, customerID string) (*AuthResponse, error) {

@@ -16,6 +16,9 @@ import type {
   PushcardConfig,
   PushcardCard,
   AdminSummary,
+  MeResponse,
+  FeatureFlag,
+  FeatureFlagUpdate,
   AuthResponse,
   OnboardingRegisterRequest,
   GoogleOnboardingRequest,
@@ -92,7 +95,10 @@ export const createProgram = (data: { customer_id: string; name: string; points_
     body: JSON.stringify(data),
   })
 
-export const updateProgram = (id: string, data: Partial<Pick<Program, "name" | "points_ratio" | "active">>) =>
+export const updateProgram = (
+  id: string,
+  data: Partial<Pick<Program, "name" | "points_ratio" | "active" | "expiry_days" | "min_ticket_amount">>,
+) =>
   request<Program>(`/programs/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
@@ -124,7 +130,21 @@ export const createCashbackProgram = (data: { customer_id: string; name: string;
     body: JSON.stringify(data),
   })
 
-export const updateCashbackProgram = (id: string, data: Partial<Pick<CashbackProgram, "name" | "cashback_rate" | "active">>) =>
+export const updateCashbackProgram = (
+  id: string,
+  data: Partial<
+    Pick<
+      CashbackProgram,
+      | "name"
+      | "cashback_rate"
+      | "active"
+      | "expiry_days"
+      | "min_ticket_amount"
+      | "max_cashback_per_tx"
+      | "max_cashback_per_period"
+    >
+  >,
+) =>
   request<CashbackProgram>(`/cashback-programs/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
@@ -194,6 +214,20 @@ export const registerAdmin = (email: string, password: string, customer_id: stri
     body: JSON.stringify({ email, password, customer_id }),
   })
 
+// Password reset (FID-16)
+// forgotPassword responde 200 siempre (no revela si el email existe).
+export const forgotPassword = (email: string) =>
+  request<{ message: string }>(`/auth/forgot-password`, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  })
+
+export const resetPassword = (token: string, new_password: string) =>
+  request<{ message: string }>(`/auth/reset-password`, {
+    method: "POST",
+    body: JSON.stringify({ token, new_password }),
+  })
+
 // Onboarding
 export const onboardingRegister = (data: OnboardingRegisterRequest) =>
   request<AuthResponse>(`/onboarding/register`, {
@@ -230,7 +264,17 @@ export const unlinkGoogle = () =>
     method: "DELETE",
   })
 
-export const getMe = () => request<AdminSummary>(`/auth/me`)
+export const getMe = () => request<MeResponse>(`/auth/me`)
+
+// Feature flags (admin — JWT authenticated)
+export const getFeatureFlags = () =>
+  request<FeatureFlag[]>(`/admin/flags`)
+
+export const updateFeatureFlag = (key: string, data: FeatureFlagUpdate) =>
+  request<FeatureFlag>(`/admin/flags/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  })
 
 // Onboarding
 export const getOnboarding = () =>
@@ -254,7 +298,11 @@ export const getPushcardConfig = (customerId: string) =>
 
 export const upsertPushcardConfig = (
   customerSisfiID: string,
-  data: { card_slots: number; reward_on_complete?: string }
+  data: {
+    card_slots: number
+    reward_on_complete?: string
+    card_expiry_days?: number | null
+  }
 ) =>
   request<PushcardConfig>(`/pushcard/programs/${customerSisfiID}/config`, {
     method: "PUT",

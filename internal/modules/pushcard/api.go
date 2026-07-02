@@ -52,6 +52,8 @@ func (h *APIHandler) upsertConfig(c *gin.Context) {
 	var req struct {
 		CardSlots        int    `json:"card_slots" binding:"required"`
 		RewardOnComplete string `json:"reward_on_complete"`
+		// CardExpiryDays: nil/omitted = sin expiración (default).
+		CardExpiryDays *int `json:"card_expiry_days"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.BadRequest("datos invalidos", err))
@@ -61,11 +63,16 @@ func (h *APIHandler) upsertConfig(c *gin.Context) {
 		c.Error(apperror.BadRequest("card_slots debe ser mayor a 0", nil))
 		return
 	}
+	if req.CardExpiryDays != nil && *req.CardExpiryDays <= 0 {
+		c.Error(apperror.BadRequest("card_expiry_days debe ser mayor a 0 o vacío", nil))
+		return
+	}
 
 	cfg := &Config{
 		CustomerSisfiID:  customerSisfiID,
 		CardSlots:        req.CardSlots,
 		RewardOnComplete: req.RewardOnComplete,
+		CardExpiryDays:   req.CardExpiryDays,
 	}
 	if err := h.service.UpsertConfig(c.Request.Context(), cfg); err != nil {
 		c.Error(err)

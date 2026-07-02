@@ -24,8 +24,9 @@ export function useCreateProgram() {
 export function useUpdateProgram(id: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: Partial<Pick<Program, "name" | "points_ratio" | "active">>) =>
-      updateProgram(id, data),
+    mutationFn: (
+      data: Partial<Pick<Program, "name" | "points_ratio" | "active" | "expiry_days" | "min_ticket_amount">>,
+    ) => updateProgram(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["programs"] })
     },

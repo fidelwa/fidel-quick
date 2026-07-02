@@ -5,15 +5,31 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/lib/pq"
 )
+
+// ErrDuplicateReceipt is returned when a receipt with the same canonical hash was
+// already registered for the same customer_sisfi (business + program). Detected
+// via the partial unique index idx_transactions_earnburn_receipt_hash.
+var ErrDuplicateReceipt = errors.New("ticket ya registrado")
+
+// isUniqueViolation reports whether err is a Postgres unique_violation (23505).
+func isUniqueViolation(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "23505"
+}
 
 type Repository interface {
 	GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error)
 	GetProgramByID(ctx context.Context, customerSisfiID string) (*EarnBurnProgram, error)
 	ListPrograms(ctx context.Context, customerID string) ([]EarnBurnProgram, error)
 	CreateProgram(ctx context.Context, p *EarnBurnProgram) error
+	UpdateProgram(ctx context.Context, p *EarnBurnProgram, setActive *bool) error
+	ExpirePoints(ctx context.Context, clientID, customerSisfiID string, expiryDays int) (int, error)
 	GetBalance(ctx context.Context, clientID, customerSisfiID string) (int, error)
 	UpsertBalance(ctx context.Context, clientID, customerSisfiID string, delta int) (int, error)
 	CreateTransaction(ctx context.Context, tx *Transaction) error
@@ -70,16 +86,31 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 
 func (r *PostgresRepository) GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error) {
 	var p EarnBurnProgram
+	var expiryDays sql.NullInt64
+	var minTicket sql.NullFloat64
 	err := r.db.QueryRowContext(ctx,
-		`SELECT cs.id, cs.customer_id, cs.name, ec.points_ratio, cs.active
+		`SELECT cs.id, cs.customer_id, cs.name, ec.points_ratio, cs.active, ec.expiry_days, ec.min_ticket_amount
 		 FROM customer_sisfi cs
 		 JOIN config_earnburn ec ON ec.customer_sisfi_id = cs.id
 		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'earn_burn' AND cs.active = true`, customerID,
-	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.PointsRatio, &p.Active)
+	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.PointsRatio, &p.Active, &expiryDays, &minTicket)
 	if err != nil {
 		return nil, fmt.Errorf("get program: %w", err)
 	}
+	applyEarnConfig(&p, expiryDays, minTicket)
 	return &p, nil
+}
+
+// applyEarnConfig maps nullable config columns onto the program struct.
+func applyEarnConfig(p *EarnBurnProgram, expiryDays sql.NullInt64, minTicket sql.NullFloat64) {
+	if expiryDays.Valid {
+		d := int(expiryDays.Int64)
+		p.ExpiryDays = &d
+	}
+	if minTicket.Valid {
+		m := minTicket.Float64
+		p.MinTicketAmount = &m
+	}
 }
 
 // CreateProgram activates earn_burn for a customer: inserts customer_sisfi link
@@ -100,10 +131,18 @@ func (r *PostgresRepository) CreateProgram(ctx context.Context, p *EarnBurnProgr
 		return fmt.Errorf("insert customer_sisfi: %w", err)
 	}
 
+	var expiryDays interface{}
+	if p.ExpiryDays != nil {
+		expiryDays = *p.ExpiryDays
+	}
+	var minTicket interface{}
+	if p.MinTicketAmount != nil {
+		minTicket = *p.MinTicketAmount
+	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO config_earnburn (customer_sisfi_id, points_ratio)
-		VALUES ($1, $2)
-	`, customerSisfiID, p.PointsRatio); err != nil {
+		INSERT INTO config_earnburn (customer_sisfi_id, points_ratio, expiry_days, min_ticket_amount)
+		VALUES ($1, $2, $3, $4)
+	`, customerSisfiID, p.PointsRatio, expiryDays, minTicket); err != nil {
 		return fmt.Errorf("insert config_earnburn: %w", err)
 	}
 
@@ -117,16 +156,140 @@ func (r *PostgresRepository) CreateProgram(ctx context.Context, p *EarnBurnProgr
 
 func (r *PostgresRepository) GetProgramByID(ctx context.Context, customerSisfiID string) (*EarnBurnProgram, error) {
 	var p EarnBurnProgram
+	var expiryDays sql.NullInt64
+	var minTicket sql.NullFloat64
 	err := r.db.QueryRowContext(ctx,
-		`SELECT cs.id, cs.customer_id, cs.name, ec.points_ratio, cs.active
+		`SELECT cs.id, cs.customer_id, cs.name, ec.points_ratio, cs.active, ec.expiry_days, ec.min_ticket_amount
 		 FROM customer_sisfi cs
 		 JOIN config_earnburn ec ON ec.customer_sisfi_id = cs.id
 		 WHERE cs.id = $1`, customerSisfiID,
-	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.PointsRatio, &p.Active)
+	).Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.PointsRatio, &p.Active, &expiryDays, &minTicket)
 	if err != nil {
 		return nil, fmt.Errorf("get program by id: %w", err)
 	}
+	applyEarnConfig(&p, expiryDays, minTicket)
 	return &p, nil
+}
+
+// UpdateProgram updates the customer_sisfi name/active and the config_earnburn
+// row for a program.
+//
+// SEMÁNTICA (full-replace en config, LG-1): expiry_days y min_ticket_amount se
+// asignan SIEMPRE con el valor recibido. Un puntero nil escribe NULL (limpia el
+// límite: "sin vencimiento" / "sin mínimo"); NO deja el valor previo. Por eso el
+// frontend debe enviar SIEMPRE todos los campos de config actuales en cada PUT
+// (incluido al alternar `active`), o de lo contrario los borraría.
+// Excepción: points_ratio usa COALESCE, así que un ratio <= 0 (mapeado a nil) sí
+// preserva el valor previo, ya que un programa no puede quedar sin ratio.
+func (r *PostgresRepository) UpdateProgram(ctx context.Context, p *EarnBurnProgram, setActive *bool) error {
+	return r.WithTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE customer_sisfi
+			SET name = COALESCE(NULLIF($2, ''), name),
+			    active = COALESCE($3, active)
+			WHERE id = $1
+		`, p.CustomerSisfiID, p.Name, setActive); err != nil {
+			return fmt.Errorf("update customer_sisfi: %w", err)
+		}
+
+		var pointsRatio interface{}
+		if p.PointsRatio > 0 {
+			pointsRatio = p.PointsRatio
+		}
+		var expiryDays interface{}
+		if p.ExpiryDays != nil {
+			expiryDays = *p.ExpiryDays
+		}
+		var minTicket interface{}
+		if p.MinTicketAmount != nil {
+			minTicket = *p.MinTicketAmount
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE config_earnburn
+			SET points_ratio      = COALESCE($2, points_ratio),
+			    expiry_days       = $3,
+			    min_ticket_amount = $4,
+			    updated_at        = NOW()
+			WHERE customer_sisfi_id = $1
+		`, p.CustomerSisfiID, pointsRatio, expiryDays, minTicket); err != nil {
+			return fmt.Errorf("update config_earnburn: %w", err)
+		}
+		return nil
+	})
+}
+
+// ExpirePoints (FID-34) posts a compensating "expiration" transaction for each
+// earn transaction older than expiryDays that has not yet been expired, then
+// returns the resulting balance. Idempotent: an earn tx is only expired once
+// (tracked by an expiration tx whose description references the earn tx id).
+// The balance floor at 0 means over-expiring already-burned points is safe.
+func (r *PostgresRepository) ExpirePoints(ctx context.Context, clientID, customerSisfiID string, expiryDays int) (int, error) {
+	var newBalance int
+	err := r.WithTx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT e.id, e.amount
+			FROM transactions_earnburn e
+			WHERE e.client_id = $1 AND e.customer_sisfi_id = $2
+			  AND e.type = 'earn' AND e.amount > 0
+			  AND e.created_at < NOW() - ($3 * INTERVAL '1 day')
+			  AND NOT EXISTS (
+			      SELECT 1 FROM transactions_earnburn x
+			      WHERE x.type = 'expiration' AND x.description = e.id::text
+			  )
+		`, clientID, customerSisfiID, expiryDays)
+		if err != nil {
+			return fmt.Errorf("select expiring earns: %w", err)
+		}
+		type expired struct {
+			id     string
+			amount int
+		}
+		var toExpire []expired
+		for rows.Next() {
+			var e expired
+			if err := rows.Scan(&e.id, &e.amount); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan expiring earn: %w", err)
+			}
+			toExpire = append(toExpire, e)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate expiring earns: %w", err)
+		}
+
+		// Read current balance (default 0 if no row).
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COALESCE((SELECT balance FROM balances_earnburn WHERE client_id = $1 AND customer_sisfi_id = $2), 0)`,
+			clientID, customerSisfiID,
+		).Scan(&newBalance); err != nil {
+			return fmt.Errorf("read balance: %w", err)
+		}
+
+		for _, e := range toExpire {
+			if err := tx.QueryRowContext(ctx, `
+				UPDATE balances_earnburn
+				SET balance = GREATEST(0, balance - $3), updated_at = NOW()
+				WHERE client_id = $1 AND customer_sisfi_id = $2
+				RETURNING balance
+			`, clientID, customerSisfiID, e.amount).Scan(&newBalance); err != nil {
+				if err == sql.ErrNoRows {
+					// No balance row => nothing to expire against; still record the marker.
+					newBalance = 0
+				} else {
+					return fmt.Errorf("deduct expired points: %w", err)
+				}
+			}
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO transactions_earnburn (id, client_id, customer_sisfi_id, type, amount, balance_after, description)
+				VALUES ($1, $2, $3, 'expiration', $4, $5, $6)
+			`, generateUUID(), clientID, customerSisfiID, -e.amount, newBalance, e.id); err != nil {
+				return fmt.Errorf("insert expiration tx: %w", err)
+			}
+		}
+		return nil
+	})
+	return newBalance, err
 }
 
 func (r *PostgresRepository) GetBalance(ctx context.Context, clientID, customerSisfiID string) (int, error) {
@@ -159,6 +322,16 @@ func (r *PostgresRepository) UpsertBalance(ctx context.Context, clientID, custom
 	return newBalance, nil
 }
 
+// CreateTransaction is a legacy non-atomic insert kept for interface parity.
+//
+// It is NOT part of any credit path: earn goes through AddPointsTx (atomic
+// balance + insert with the receipt anti-fraud columns), burn through
+// BurnPointsTx and adjustments through AdjustPointsTx. Nothing calls this method
+// (verified: only the interface decl and the test mock reference it). Because it
+// never accredits, it deliberately does NOT carry the receipt_* columns — adding
+// them here would imply a credit path that does not exist. Do not wire this into
+// crediting; use AddPointsTx. Left in place (rather than deleted) only to satisfy
+// the Repository interface used elsewhere.
 func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *Transaction) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO transactions_earnburn
@@ -418,16 +591,35 @@ func (r *PostgresRepository) AddPointsTx(ctx context.Context, t *Transaction) (i
 
 		t.BalanceAfter = newBalance
 
-		// Create transaction record
+		// Create transaction record. receipt_hash is inserted as NULL when empty
+		// so the partial unique index only guards confidently-hashed tickets.
+		// A unique violation here rolls back the whole tx (balance included), so a
+		// duplicate ticket never credits points.
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO transactions_earnburn
-			(id, client_id, customer_sisfi_id, collaborator_id, type, amount, balance_after, invoice_url, description, manual_entry, correctable_until)
-			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, $11)
+			(id, client_id, customer_sisfi_id, collaborator_id, type, amount, balance_after, invoice_url, description, manual_entry, correctable_until, receipt_data, receipt_hash, receipt_hash_fields, receipt_confident)
+			VALUES ($1, $2, $3, NULLIF($4, '')::uuid, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, $11, $12, NULLIF($13, ''), $14, $15)
 		`, t.ID, t.ClientID, t.CustomerSisfiID, t.CollaboratorID, t.Type, t.Amount, t.BalanceAfter,
-			t.InvoiceURL, t.Description, t.ManualEntry, t.CorrectableUntil)
-		return err
+			t.InvoiceURL, t.Description, t.ManualEntry, t.CorrectableUntil,
+			nullableJSON(t.ReceiptData), t.ReceiptHash, pq.Array(t.ReceiptHashFields), t.ReceiptConfident)
+		if err != nil {
+			if isUniqueViolation(err) {
+				return ErrDuplicateReceipt
+			}
+			return err
+		}
+		return nil
 	})
 	return newBalance, err
+}
+
+// nullableJSON returns nil (SQL NULL) for empty payloads so JSONB columns stay
+// NULL rather than storing an empty string / "null" literal.
+func nullableJSON(b []byte) interface{} {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
 }
 
 // BurnPointsTx atomically deducts points and creates a redemption record.
@@ -472,7 +664,7 @@ func (r *PostgresRepository) BurnPointsTx(ctx context.Context, t *Transaction, r
 
 func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string) ([]EarnBurnProgram, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT cs.id, cs.customer_id, cs.name, ec.points_ratio, cs.active
+		`SELECT cs.id, cs.customer_id, cs.name, ec.points_ratio, cs.active, ec.expiry_days, ec.min_ticket_amount
 		 FROM customer_sisfi cs
 		 JOIN config_earnburn ec ON ec.customer_sisfi_id = cs.id
 		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'earn_burn' AND cs.active = true
@@ -486,9 +678,12 @@ func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string
 	var programs []EarnBurnProgram
 	for rows.Next() {
 		var p EarnBurnProgram
-		if err := rows.Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.PointsRatio, &p.Active); err != nil {
+		var expiryDays sql.NullInt64
+		var minTicket sql.NullFloat64
+		if err := rows.Scan(&p.CustomerSisfiID, &p.CustomerID, &p.Name, &p.PointsRatio, &p.Active, &expiryDays, &minTicket); err != nil {
 			return nil, fmt.Errorf("scan program: %w", err)
 		}
+		applyEarnConfig(&p, expiryDays, minTicket)
 		programs = append(programs, p)
 	}
 	return programs, nil

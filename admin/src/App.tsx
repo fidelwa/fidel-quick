@@ -16,6 +16,8 @@ import { CollaboratorsListPage } from "@/pages/collaborators/collaborators-list"
 import { ClientLookupPage } from "@/pages/clients/client-lookup"
 import { FeedbackListPage } from "@/pages/feedback/feedback-list"
 import { RegistroPage } from "@/pages/registro"
+import { ForgotPasswordPage } from "@/pages/forgot-password"
+import { ResetPasswordPage } from "@/pages/reset-password"
 import { OnboardingLayout } from "@/pages/onboarding/onboarding-layout"
 
 const queryClient = new QueryClient({
@@ -48,6 +50,8 @@ function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/registro" element={<RegistroPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/onboarding" element={<OnboardingLayout />} />
             <Route element={<AppLayout />}>
               <Route index element={<DashboardPage />} />

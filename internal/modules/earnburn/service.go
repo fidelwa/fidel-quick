@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/theluisbolivar/fidel-quick/internal/apperror"
+	"github.com/theluisbolivar/fidel-quick/internal/platform/ai"
 )
 
 const (
@@ -37,6 +38,12 @@ func (s *Service) AddPoints(ctx context.Context, req AddPointsReq) (*Transaction
 		return nil, fmt.Errorf("get program: %w", err)
 	}
 
+	// FID-36: ticket mínimo. Si está configurado y la compra no lo alcanza,
+	// no se acredita. nil = sin mínimo.
+	if program.MinTicketAmount != nil && req.Amount < *program.MinTicketAmount {
+		return nil, fmt.Errorf("monto de compra ($%.2f) menor al ticket mínimo ($%.2f); no se acreditan puntos", req.Amount, *program.MinTicketAmount)
+	}
+
 	points := int(math.Floor(req.Amount / float64(program.PointsRatio)))
 	if points <= 0 {
 		return nil, fmt.Errorf("monto insuficiente para acumular puntos (ratio: %d)", program.PointsRatio)
@@ -55,8 +62,23 @@ func (s *Service) AddPoints(ctx context.Context, req AddPointsReq) (*Transaction
 		CorrectableUntil: &correctableUntil,
 	}
 
+	// Anti-fraude (FID-33): persistir el extract y calcular el hash de dedup.
+	if req.Invoice != nil {
+		fp, err := ai.ComputeFingerprint(req.Invoice)
+		if err != nil {
+			return nil, fmt.Errorf("compute receipt fingerprint: %w", err)
+		}
+		tx.ReceiptData = fp.Data
+		tx.ReceiptHash = fp.Hash
+		tx.ReceiptHashFields = fp.HashFields
+		tx.ReceiptConfident = fp.Confident
+	}
+
 	newBalance, err := s.repo.AddPointsTx(ctx, tx)
 	if err != nil {
+		if errors.Is(err, ErrDuplicateReceipt) {
+			return nil, apperror.Conflict("ticket ya registrado", err)
+		}
 		return nil, fmt.Errorf("add points tx: %w", err)
 	}
 
@@ -73,7 +95,20 @@ func (s *Service) AddPoints(ctx context.Context, req AddPointsReq) (*Transaction
 }
 
 // CheckBalance returns the current balance for a client.
+//
+// FID-34 (expiración lazy): si el programa tiene expiry_days configurado, antes
+// de devolver el saldo se expiran de forma perezosa las cargas ("earn") cuyos
+// puntos ya vencieron —registrando una transacción "expiration" compensatoria—.
+// nil = sin vencimiento, comportamiento intacto.
 func (s *Service) CheckBalance(ctx context.Context, clientID, customerSisfiID string) (int, error) {
+	program, err := s.repo.GetProgramByID(ctx, customerSisfiID)
+	if err == nil && program.ExpiryDays != nil {
+		if balance, expErr := s.repo.ExpirePoints(ctx, clientID, customerSisfiID, *program.ExpiryDays); expErr == nil {
+			return balance, nil
+		} else {
+			s.log.Error("expire points failed, returning stored balance", "error", expErr, "client_id", clientID)
+		}
+	}
 	return s.repo.GetBalance(ctx, clientID, customerSisfiID)
 }
 
@@ -365,6 +400,25 @@ func (s *Service) CreateProgram(ctx context.Context, p *EarnBurnProgram) error {
 	}
 	if err := s.repo.CreateProgram(ctx, p); err != nil {
 		return apperror.Internal("error al crear programa", err)
+	}
+	return nil
+}
+
+// UpdateProgram updates an existing program's name, points_ratio and the
+// loyalty config options (expiry_days, min_ticket_amount). setActive toggles the
+// program active flag; nil leaves it unchanged.
+func (s *Service) UpdateProgram(ctx context.Context, p *EarnBurnProgram, setActive *bool) error {
+	if p.CustomerSisfiID == "" {
+		return apperror.BadRequest("id de programa requerido", nil)
+	}
+	if p.ExpiryDays != nil && *p.ExpiryDays <= 0 {
+		return apperror.BadRequest("expiry_days debe ser mayor a 0", nil)
+	}
+	if p.MinTicketAmount != nil && *p.MinTicketAmount < 0 {
+		return apperror.BadRequest("min_ticket_amount no puede ser negativo", nil)
+	}
+	if err := s.repo.UpdateProgram(ctx, p, setActive); err != nil {
+		return apperror.Internal("error al actualizar programa", err)
 	}
 	return nil
 }
