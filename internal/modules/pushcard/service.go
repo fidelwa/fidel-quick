@@ -16,6 +16,11 @@ const CorrectionWindow = 2 * time.Hour
 var (
 	ErrConfigNotFound = errors.New("pushcard config no encontrado")
 	ErrNoStampToUndo  = errors.New("no hay sello reciente para deshacer")
+	// ErrCardCancelled is returned by UndoLastStamp when the stamp belongs to a
+	// card that was already cancelled (e.g. auto-expired). Undoing would silently
+	// mutate a terminal-state card and drop the stamp with no useful effect, so we
+	// reject it instead.
+	ErrCardCancelled = errors.New("la tarjeta fue cancelada (venció); no se puede deshacer el sello")
 )
 
 // Service implements pushcard business rules.
@@ -158,6 +163,13 @@ func (s *Service) UndoLastStamp(ctx context.Context, collaboratorID string) (*Ca
 	card, err := s.repo.GetCard(ctx, stamp.CardID)
 	if err != nil {
 		return nil, fmt.Errorf("get card: %w", err)
+	}
+
+	// If the card was cancelled (e.g. auto-expired) between the stamp and this
+	// undo, deleting the stamp would silently drop it from a terminal-state card
+	// with no useful effect. Reject the undo instead of losing the stamp quietly.
+	if card.Status == StatusCancelled {
+		return nil, ErrCardCancelled
 	}
 
 	if err := s.repo.DeleteStamp(ctx, stamp.ID); err != nil {

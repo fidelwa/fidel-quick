@@ -341,6 +341,52 @@ func TestUndoLastStamp_NoneToUndo(t *testing.T) {
 	}
 }
 
+// TestUndoLastStamp_RejectsUndoOnExpiredCancelledCard (LG-3) covers the
+// undo+expiración interaction: a card with expiry configured accrues a stamp,
+// then is auto-cancelled because it went stale, then the collaborator tries to
+// undo within the correction window. The stamp still exists (append-only) and
+// LastStampByCollaborator will find it, but its card is now cancelled. Undoing
+// would silently DeleteStamp from a terminal-state card and drop the stamp with
+// no useful effect, so the service must reject the undo (ErrCardCancelled) and
+// leave the stamp intact rather than losing it silently.
+func TestUndoLastStamp_RejectsUndoOnExpiredCancelledCard(t *testing.T) {
+	svc, repo := newTestService()
+	cfg := repo.seedConfig("cs-1", 5)
+	cfg.CardExpiryDays = intPtr(7)
+	ctx := context.Background()
+
+	// A stamp opens a card.
+	r1, err := svc.AddStamp(ctx, AddStampReq{CustomerSisfiID: "cs-1", ClientID: "c", CollaboratorID: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cardID := r1.Card.ID
+
+	// Age the card past expiry, then trigger lazy expiration via GetProgress.
+	// The stamp's created_at stays recent, so it remains within CorrectionWindow.
+	repo.backdateOpenCard("cs-1", "c", 8*24*time.Hour)
+	if _, err := svc.GetProgress(ctx, "cs-1", "c"); err != nil {
+		t.Fatal(err)
+	}
+	if old, _ := repo.GetCard(ctx, cardID); old.Status != StatusCancelled {
+		t.Fatalf("precondition: expected card cancelled, got %s", old.Status)
+	}
+
+	// Undo must be rejected rather than silently deleting the stamp.
+	if _, err := svc.UndoLastStamp(ctx, "k"); !errors.Is(err, ErrCardCancelled) {
+		t.Fatalf("expected ErrCardCancelled, got %v", err)
+	}
+
+	// The stamp must NOT have been lost: it is still present on the cancelled card.
+	n, err := repo.CountStamps(ctx, cardID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("stamp was silently lost: want 1 stamp on cancelled card, got %d", n)
+	}
+}
+
 func TestGetProgress_NoOpenCard(t *testing.T) {
 	svc, repo := newTestService()
 	repo.seedConfig("cs-1", 5)
