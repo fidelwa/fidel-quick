@@ -121,6 +121,38 @@ func TestComputeFingerprint_NoHashWhenMissingFolio(t *testing.T) {
 	}
 }
 
+// A failed / low-signal Gemini analysis produces a zero-value InvoiceResult.
+// We must NOT serialize it: Data stays nil so receipt_data ends up NULL rather
+// than a meaningless empty JSON blob. The transaction is still credited (no hash).
+func TestComputeFingerprint_NoDataForZeroValueInvoice(t *testing.T) {
+	fp, err := ComputeFingerprint(&InvoiceResult{}) // zero-value, !Confident
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fp.Data != nil {
+		t.Fatalf("expected nil Data for a zero-value invoice, got %q", fp.Data)
+	}
+	if fp.Hash != "" || len(fp.HashFields) != 0 {
+		t.Fatalf("expected no hash for a zero-value invoice, got hash=%q fields=%v", fp.Hash, fp.HashFields)
+	}
+}
+
+// A non-confident extract that still carries real data (e.g. a total and a
+// business name Gemini was unsure about) must persist for auditing.
+func TestComputeFingerprint_KeepsDataWhenNotConfidentButHasContent(t *testing.T) {
+	inv := &InvoiceResult{Total: 250, BusinessName: "Taquería El Fogón", Confident: false}
+	fp, err := ComputeFingerprint(inv)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fp.Data) == 0 {
+		t.Fatal("expected data to be persisted for a non-confident extract with real content")
+	}
+	if fp.Hash != "" {
+		t.Fatalf("expected no hash for a non-confident extract, got %q", fp.Hash)
+	}
+}
+
 func TestComputeFingerprint_NilInvoice(t *testing.T) {
 	fp, err := ComputeFingerprint(nil)
 	if err != nil {

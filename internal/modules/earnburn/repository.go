@@ -170,6 +170,16 @@ func (r *PostgresRepository) UpsertBalance(ctx context.Context, clientID, custom
 	return newBalance, nil
 }
 
+// CreateTransaction is a legacy non-atomic insert kept for interface parity.
+//
+// It is NOT part of any credit path: earn goes through AddPointsTx (atomic
+// balance + insert with the receipt anti-fraud columns), burn through
+// BurnPointsTx and adjustments through AdjustPointsTx. Nothing calls this method
+// (verified: only the interface decl and the test mock reference it). Because it
+// never accredits, it deliberately does NOT carry the receipt_* columns — adding
+// them here would imply a credit path that does not exist. Do not wire this into
+// crediting; use AddPointsTx. Left in place (rather than deleted) only to satisfy
+// the Repository interface used elsewhere.
 func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *Transaction) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO transactions_earnburn

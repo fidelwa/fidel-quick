@@ -65,12 +65,19 @@ func ComputeFingerprint(inv *InvoiceResult) (ReceiptFingerprint, error) {
 		return fp, nil
 	}
 
-	data, err := json.Marshal(inv)
-	if err != nil {
-		return fp, fmt.Errorf("marshal invoice: %w", err)
-	}
-	fp.Data = data
 	fp.Confident = inv.Confident
+
+	// Solo serializamos el extract cuando trae datos reales. Un análisis fallido /
+	// no confiable de Gemini produce un InvoiceResult zero-value; en ese caso Data
+	// se deja nil para que receipt_data quede NULL en la BD (no un JSON '{...}'
+	// vacío que ensucie auditoría/consultas). El crédito no se bloquea (LG-3).
+	if hasExtractData(inv) {
+		data, err := json.Marshal(inv)
+		if err != nil {
+			return fp, fmt.Errorf("marshal invoice: %w", err)
+		}
+		fp.Data = data
+	}
 
 	// Ticket no identificable de forma confiable → sin hash (se acredita igual).
 	if !inv.Confident || strings.TrimSpace(inv.InvoiceNumber) == "" {
@@ -97,6 +104,29 @@ func ComputeFingerprint(inv *InvoiceResult) (ReceiptFingerprint, error) {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	fp.Hash = hex.EncodeToString(sum[:])
 	return fp, nil
+}
+
+// hasExtractData reports whether the invoice carries any real extracted content.
+// A failed / low-signal Gemini analysis yields a zero-value InvoiceResult (all
+// fields empty, Confident=false); such a result must NOT be persisted so that
+// receipt_data stays NULL instead of a meaningless '{}'-ish JSON blob.
+func hasExtractData(inv *InvoiceResult) bool {
+	if inv.Confident {
+		return true
+	}
+	if inv.Total != 0 || inv.Subtotal != 0 || inv.Tax != 0 || inv.Tip != 0 {
+		return true
+	}
+	if strings.TrimSpace(inv.Currency) != "" ||
+		strings.TrimSpace(inv.BusinessName) != "" ||
+		strings.TrimSpace(inv.BusinessRFC) != "" ||
+		strings.TrimSpace(inv.BusinessAddress) != "" ||
+		strings.TrimSpace(inv.InvoiceNumber) != "" ||
+		strings.TrimSpace(inv.Date) != "" ||
+		strings.TrimSpace(inv.PaymentMethod) != "" {
+		return true
+	}
+	return len(inv.Items) > 0
 }
 
 // normalizeText trims, lowercases and collapses internal whitespace.
@@ -134,13 +164,14 @@ func normalizeDate(s string) string {
 	}
 	layouts := []string{
 		"2006-01-02",
-		"2006-01-02T15:04:05Z07:00",
 		"2006-01-02 15:04:05",
+		// DD/MM/YYYY and DD-MM-YYYY: día primero es la convención en MX. No se
+		// incluye el layout MM/DD ("01/02/2006") a propósito: sería inalcanzable
+		// (02/01 ya matchea primero) y ambiguo para tickets mexicanos.
 		"02/01/2006",
-		"01/02/2006",
 		"02-01-2006",
 		"2006/01/02",
-		time.RFC3339,
+		time.RFC3339, // == "2006-01-02T15:04:05Z07:00"
 	}
 	for _, l := range layouts {
 		if t, err := time.Parse(l, raw); err == nil {
