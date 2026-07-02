@@ -1,7 +1,12 @@
 package whatsapp
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -15,6 +20,7 @@ import (
 // WebhookHandler processes incoming WhatsApp messages through the full pipeline.
 type WebhookHandler struct {
 	verifyToken string
+	appSecret   string // Meta App Secret para validar X-Hub-Signature-256 (vacío = skip).
 	client      *Client
 	session     *session.Manager
 	business    *resolver.BusinessResolver
@@ -26,6 +32,7 @@ type WebhookHandler struct {
 
 func NewWebhookHandler(
 	verifyToken string,
+	appSecret string,
 	client *Client,
 	sess *session.Manager,
 	business *resolver.BusinessResolver,
@@ -34,8 +41,12 @@ func NewWebhookHandler(
 	engine *flow.Engine,
 	log *slog.Logger,
 ) *WebhookHandler {
+	if appSecret == "" {
+		log.Warn("whatsapp.webhook: WHATSAPP_APP_SECRET not set — POST /webhook signature validation is DISABLED (acceptable for dev only)")
+	}
 	return &WebhookHandler{
 		verifyToken: verifyToken,
+		appSecret:   appSecret,
 		client:      client,
 		session:     sess,
 		business:    business,
@@ -61,7 +72,24 @@ func (h *WebhookHandler) Verify(c *gin.Context) {
 }
 
 // Receive handles POST /webhook — incoming messages.
+// Valida HMAC SHA256 de Meta (X-Hub-Signature-256) si appSecret está configurado.
 func (h *WebhookHandler) Receive(c *gin.Context) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		h.log.Error("read webhook body", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
+	if h.appSecret != "" {
+		if !verifySignature(c.GetHeader("X-Hub-Signature-256"), body, h.appSecret) {
+			h.log.Warn("webhook signature invalid", "ip", c.ClientIP())
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+	}
+
 	var payload WebhookPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		h.log.Error("invalid webhook payload", "error", err)
@@ -338,4 +366,21 @@ func (h *WebhookHandler) resolveAndCreateSession(ctx context.Context, phone, cus
 // autoRegisterClient inserts a new client record when a user arrives via deeplink.
 func (h *WebhookHandler) autoRegisterClient(ctx context.Context, phone, customerID string) error {
 	return h.repo.RegisterClient(ctx, customerID, phone)
+}
+
+// verifySignature compares the X-Hub-Signature-256 header against an HMAC SHA256
+// of the request body keyed with the Meta App Secret. Constant-time compare.
+// Header format: "sha256=<hex>".
+func verifySignature(header string, body []byte, appSecret string) bool {
+	const prefix = "sha256="
+	if len(header) <= len(prefix) || header[:len(prefix)] != prefix {
+		return false
+	}
+	got, err := hex.DecodeString(header[len(prefix):])
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(appSecret))
+	mac.Write(body)
+	return hmac.Equal(mac.Sum(nil), got)
 }

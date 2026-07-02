@@ -67,6 +67,10 @@ func (m *mockRepo) SlugExists(slug string) (bool, error) {
 	return false, nil
 }
 
+func (m *mockRepo) CustomerPhoneExists(_ string) (bool, error) {
+	return false, nil
+}
+
 func (m *mockRepo) LinkGoogle(adminID string, profile *GoogleProfile) error {
 	if m.linkGoogleFn != nil {
 		return m.linkGoogleFn(adminID, profile)

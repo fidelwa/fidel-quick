@@ -2,6 +2,7 @@ package landing
 
 import (
 	"database/sql"
+	"embed"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,13 @@ import (
 	"github.com/theluisbolivar/fidel-quick/internal/deeplink"
 	"github.com/theluisbolivar/fidel-quick/internal/resolver"
 )
+
+// templatesFS embebe los templates HTML del landing en el binario.
+// Sin esto, ParseGlob falla en runtime porque la imagen Docker
+// solo copia el binario al stage final, no la carpeta templates/.
+//
+//go:embed templates/*.html
+var templatesFS embed.FS
 
 type Handler struct {
 	repo         resolver.Repository
@@ -29,7 +37,7 @@ type businessData struct {
 }
 
 func NewHandler(repo resolver.Repository, log *slog.Logger, displayPhone string) *Handler {
-	tmpl := template.Must(template.ParseGlob("internal/landing/templates/*.html"))
+	tmpl := template.Must(template.ParseFS(templatesFS, "templates/*.html"))
 	return &Handler{
 		repo:         repo,
 		log:          log,

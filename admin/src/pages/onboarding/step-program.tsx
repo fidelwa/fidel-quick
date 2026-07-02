@@ -1,94 +1,106 @@
 import { useState } from "react"
-import { useAuth } from "@/context/auth-context"
-import { useCreateProgram } from "@/hooks/use-programs"
-import { useCreateCashbackProgram } from "@/hooks/use-cashback-programs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
-import { Star, Wallet, Loader2 } from "lucide-react"
+import { Star, Wallet, Stamp } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Program, CashbackProgram } from "@/types"
+import type {
+  EarnBurnDraft,
+  CashbackDraft,
+  PushcardDraft,
+} from "@/hooks/use-onboarding"
 
 interface StepProgramProps {
-  earnBurnProgram: Program | null
-  cashbackProgram: CashbackProgram | null
-  onEarnBurnCreated: (program: Program | null) => void
-  onCashbackCreated: (program: CashbackProgram | null) => void
+  earnBurnDraft: EarnBurnDraft | null
+  cashbackDraft: CashbackDraft | null
+  pushcardDraft: PushcardDraft | null
+  onEarnBurnChange: (draft: EarnBurnDraft | null) => void
+  onCashbackChange: (draft: CashbackDraft | null) => void
+  onPushcardChange: (draft: PushcardDraft | null) => void
   onNext: () => void
 }
 
 export function StepProgram({
-  earnBurnProgram,
-  cashbackProgram,
-  onEarnBurnCreated,
-  onCashbackCreated,
+  earnBurnDraft,
+  cashbackDraft,
+  pushcardDraft,
+  onEarnBurnChange,
+  onCashbackChange,
+  onPushcardChange,
   onNext,
 }: StepProgramProps) {
-  const { customerId } = useAuth()
-  const createProgram = useCreateProgram()
-  const createCashbackProgram = useCreateCashbackProgram()
+  const [earnSelected, setEarnSelected] = useState(!!earnBurnDraft)
+  const [cashbackSelected, setCashbackSelected] = useState(!!cashbackDraft)
+  const [pushcardSelected, setPushcardSelected] = useState(!!pushcardDraft)
 
-  const [earnSelected, setEarnSelected] = useState(!!earnBurnProgram)
-  const [cashbackSelected, setCashbackSelected] = useState(!!cashbackProgram)
+  const [earnName, setEarnName] = useState(earnBurnDraft?.name ?? "")
+  const [earnRatio, setEarnRatio] = useState(
+    earnBurnDraft ? String(earnBurnDraft.points_ratio) : "15"
+  )
 
-  const [earnName, setEarnName] = useState(earnBurnProgram?.name ?? "")
-  const [earnRatio, setEarnRatio] = useState(String(earnBurnProgram?.points_ratio ?? 15))
+  const [cashbackName, setCashbackName] = useState(cashbackDraft?.name ?? "")
+  const [cashbackRate, setCashbackRate] = useState(
+    cashbackDraft ? String(cashbackDraft.cashback_rate) : "5"
+  )
 
-  const [cashbackName, setCashbackName] = useState(cashbackProgram?.name ?? "")
-  const [cashbackRate, setCashbackRate] = useState(String(cashbackProgram?.cashback_rate ?? 5))
+  const [pushcardName, setPushcardName] = useState(pushcardDraft?.name ?? "")
+  const [pushcardSlots, setPushcardSlots] = useState(
+    pushcardDraft ? String(pushcardDraft.card_slots) : "10"
+  )
 
-  const [saving, setSaving] = useState(false)
-
-  const handleNext = async () => {
-    if (!earnSelected && !cashbackSelected) {
+  const handleNext = () => {
+    if (!earnSelected && !cashbackSelected && !pushcardSelected) {
       toast.error("Selecciona al menos un tipo de programa")
       return
     }
 
-    setSaving(true)
-    try {
-      if (earnSelected && !earnBurnProgram) {
-        if (!earnName.trim()) {
-          toast.error("Ingresa el nombre del programa de puntos")
-          setSaving(false)
-          return
-        }
-        const program = await createProgram.mutateAsync({
-          customer_id: customerId,
-          name: earnName.trim(),
-          points_ratio: Number(earnRatio) || 15,
-        })
-        onEarnBurnCreated(program)
+    if (earnSelected) {
+      if (!earnName.trim()) {
+        toast.error("Ingresa el nombre del programa de puntos")
+        return
       }
-
-      if (cashbackSelected && !cashbackProgram) {
-        if (!cashbackName.trim()) {
-          toast.error("Ingresa el nombre del programa de cashback")
-          setSaving(false)
-          return
-        }
-        const program = await createCashbackProgram.mutateAsync({
-          customer_id: customerId,
-          name: cashbackName.trim(),
-          cashback_rate: Number(cashbackRate) || 5,
-        })
-        onCashbackCreated(program)
+      const ratio = Number(earnRatio)
+      if (!ratio || ratio < 1) {
+        toast.error("El ratio de puntos debe ser mayor a 0")
+        return
       }
-
-      if (!earnSelected && earnBurnProgram) {
-        onEarnBurnCreated(null)
-      }
-      if (!cashbackSelected && cashbackProgram) {
-        onCashbackCreated(null)
-      }
-
-      onNext()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error al crear programa")
-    } finally {
-      setSaving(false)
+      onEarnBurnChange({ name: earnName.trim(), points_ratio: ratio })
+    } else {
+      onEarnBurnChange(null)
     }
+
+    if (cashbackSelected) {
+      if (!cashbackName.trim()) {
+        toast.error("Ingresa el nombre del programa de cashback")
+        return
+      }
+      const rate = Number(cashbackRate)
+      if (!rate || rate < 1 || rate > 100) {
+        toast.error("El % de cashback debe estar entre 1 y 100")
+        return
+      }
+      onCashbackChange({ name: cashbackName.trim(), cashback_rate: rate })
+    } else {
+      onCashbackChange(null)
+    }
+
+    if (pushcardSelected) {
+      if (!pushcardName.trim()) {
+        toast.error("Ingresa el nombre del programa de tarjeta de sellos")
+        return
+      }
+      const slots = Number(pushcardSlots)
+      if (!slots || slots < 2 || slots > 50) {
+        toast.error("La tarjeta debe tener entre 2 y 50 sellos")
+        return
+      }
+      onPushcardChange({ name: pushcardName.trim(), card_slots: slots })
+    } else {
+      onPushcardChange(null)
+    }
+
+    onNext()
   }
 
   return (
@@ -96,22 +108,18 @@ export function StepProgram({
       <div>
         <h2 className="text-xl font-semibold">Elige tu programa de fidelidad</h2>
         <p className="text-sm text-muted-foreground">
-          Selecciona el tipo de programa para tu negocio
+          Selecciona uno o varios. Pod&eacute;s combinarlos.
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         {/* Earn-Burn Card */}
         <button
           type="button"
-          onClick={() => {
-            if (earnBurnProgram) return
-            setEarnSelected(!earnSelected)
-            if (!earnSelected) setCashbackSelected(false)
-          }}
+          onClick={() => setEarnSelected(!earnSelected)}
           className={cn(
             "rounded-lg border-2 p-4 text-left transition-all duration-200",
-            earnSelected || earnBurnProgram
+            earnSelected
               ? "border-primary bg-primary/5 shadow-sm"
               : "border-border hover:border-primary/30"
           )}
@@ -125,22 +133,15 @@ export function StepProgram({
               <p className="text-xs text-muted-foreground">Acumula y canjea puntos</p>
             </div>
           </div>
-          {earnBurnProgram && (
-            <p className="mt-2 text-xs text-green-600 font-medium">Creado</p>
-          )}
         </button>
 
         {/* Cashback Card */}
         <button
           type="button"
-          onClick={() => {
-            if (cashbackProgram) return
-            setCashbackSelected(!cashbackSelected)
-            if (!cashbackSelected) setEarnSelected(false)
-          }}
+          onClick={() => setCashbackSelected(!cashbackSelected)}
           className={cn(
             "rounded-lg border-2 p-4 text-left transition-all duration-200",
-            cashbackSelected || cashbackProgram
+            cashbackSelected
               ? "border-primary bg-primary/5 shadow-sm"
               : "border-border hover:border-primary/30"
           )}
@@ -154,9 +155,28 @@ export function StepProgram({
               <p className="text-xs text-muted-foreground">Porcentaje de devolucion</p>
             </div>
           </div>
-          {cashbackProgram && (
-            <p className="mt-2 text-xs text-green-600 font-medium">Creado</p>
+        </button>
+
+        {/* Pushcard Card */}
+        <button
+          type="button"
+          onClick={() => setPushcardSelected(!pushcardSelected)}
+          className={cn(
+            "rounded-lg border-2 p-4 text-left transition-all duration-200",
+            pushcardSelected
+              ? "border-primary bg-primary/5 shadow-sm"
+              : "border-border hover:border-primary/30"
           )}
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+              <Stamp className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-medium">Tarjeta de sellos</p>
+              <p className="text-xs text-muted-foreground">Acumula sellos y completa</p>
+            </div>
+          </div>
         </button>
       </div>
 
@@ -164,7 +184,7 @@ export function StepProgram({
       <div
         className={cn(
           "grid transition-all duration-200",
-          earnSelected || earnBurnProgram ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+          earnSelected ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
         )}
       >
         <div className="overflow-hidden">
@@ -178,7 +198,6 @@ export function StepProgram({
                   placeholder="Programa de puntos"
                   value={earnName}
                   onChange={(e) => setEarnName(e.target.value)}
-                  disabled={!!earnBurnProgram}
                 />
               </div>
               <div className="space-y-1.5">
@@ -189,7 +208,6 @@ export function StepProgram({
                   min={1}
                   value={earnRatio}
                   onChange={(e) => setEarnRatio(e.target.value)}
-                  disabled={!!earnBurnProgram}
                 />
               </div>
             </div>
@@ -206,7 +224,7 @@ export function StepProgram({
       <div
         className={cn(
           "grid transition-all duration-200",
-          cashbackSelected || cashbackProgram ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+          cashbackSelected ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
         )}
       >
         <div className="overflow-hidden">
@@ -220,7 +238,6 @@ export function StepProgram({
                   placeholder="Programa de cashback"
                   value={cashbackName}
                   onChange={(e) => setCashbackName(e.target.value)}
-                  disabled={!!cashbackProgram}
                 />
               </div>
               <div className="space-y-1.5">
@@ -231,8 +248,7 @@ export function StepProgram({
                   min={1}
                   max={100}
                   value={cashbackRate}
-                  onChange={(e) => setCashbackRate(Number(e.target.value))}
-                  disabled={!!cashbackProgram}
+                  onChange={(e) => setCashbackRate(e.target.value)}
                 />
               </div>
             </div>
@@ -240,17 +256,47 @@ export function StepProgram({
         </div>
       </div>
 
+      {/* Pushcard Config */}
+      <div
+        className={cn(
+          "grid transition-all duration-200",
+          pushcardSelected ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        )}
+      >
+        <div className="overflow-hidden">
+          <div className="space-y-3 pt-2">
+            <h3 className="text-sm font-medium">Configurar tarjeta de sellos</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="pushcard-name">Nombre del programa</Label>
+                <Input
+                  id="pushcard-name"
+                  placeholder="Tarjeta de sellos"
+                  value={pushcardName}
+                  onChange={(e) => setPushcardName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pushcard-slots">Sellos para completar</Label>
+                <Input
+                  id="pushcard-slots"
+                  type="number"
+                  min={2}
+                  max={50}
+                  value={pushcardSlots}
+                  onChange={(e) => setPushcardSlots(e.target.value)}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Configura la recompensa al completar la tarjeta luego desde el panel de pushcard.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="flex justify-end">
-        <Button onClick={handleNext} disabled={saving}>
-          {saving ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Guardando...
-            </>
-          ) : (
-            "Siguiente"
-          )}
-        </Button>
+        <Button onClick={handleNext}>Siguiente</Button>
       </div>
     </div>
   )

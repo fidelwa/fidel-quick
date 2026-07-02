@@ -15,7 +15,7 @@ export function useCreateCashbackReward(programId: string) {
   return useMutation({
     mutationFn: async (data: { name: string; description: string; cost: number }) => {
       const resp = await createCashbackReward(programId, data)
-      return { customer_sisfi_id: programId, active: true, ...data, ...resp } as CashbackReward
+      return { ...data, ...resp } as CashbackReward
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cashback-rewards", programId] })

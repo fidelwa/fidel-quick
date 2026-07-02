@@ -24,8 +24,20 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# env files (todos los .env* tienen secretos excepto .env.example y .env.deploy.example)
 .env
+.env.local
+.env.deploy
+.env.production
+.env.staging
+
+# Terraform — *.tfvars contienen secrets (db_password, tokens). Solo .example se commitea.
+*.tfvars
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfplan
 
 # Editor/IDE
 # .idea/

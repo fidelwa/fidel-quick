@@ -15,6 +15,7 @@ type Repository interface {
 	Create(admin *Admin) error
 	CreateCustomer(name, slug, phone, description string) (customerID string, err error)
 	SlugExists(slug string) (bool, error)
+	CustomerPhoneExists(phone string) (bool, error)
 	LinkGoogle(adminID string, profile *GoogleProfile) error
 	UnlinkGoogle(adminID string) error
 	UpdateGoogleProfile(adminID string, profile *GoogleProfile) error
@@ -133,6 +134,16 @@ func (r *PostgresRepository) CreateCustomer(name, slug, phone, description strin
 func (r *PostgresRepository) SlugExists(slug string) (bool, error) {
 	var exists bool
 	err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM customers WHERE slug = $1)`, slug).Scan(&exists)
+	return exists, err
+}
+
+// CustomerPhoneExists devuelve true si algún negocio activo ya está
+// registrado con ese phone. Sin uniqueness en la DB (un mismo dueño
+// puede tener varios negocios con el mismo número), pero el frontend
+// usa este check para confirmar la intención del usuario.
+func (r *PostgresRepository) CustomerPhoneExists(phone string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM customers WHERE phone = $1 AND active = true)`, phone).Scan(&exists)
 	return exists, err
 }
 

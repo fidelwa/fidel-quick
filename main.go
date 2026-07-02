@@ -127,6 +127,7 @@ func main() {
 	// WhatsApp webhook handler
 	webhookHandler := whatsapp.NewWebhookHandler(
 		cfg.WhatsAppVerifyToken,
+		cfg.WhatsAppAppSecret,
 		waClient,
 		sessionMgr,
 		businessResolver,
@@ -160,7 +161,7 @@ func main() {
 	landingHandler := landing.NewHandler(resolverRepo, log, cfg.WhatsAppDisplayPhone)
 
 	// Router (API + landing + webhook)
-	r := api.SetupRouter(cfg.BearerToken, cfg.JWTSecret, landingHandler, webhookHandler, registry, adminAPI, onboardingAPI, sisfiAPI, log, cfg.IsDevelopment())
+	r := api.SetupRouter(cfg.BearerToken, cfg.JWTSecret, landingHandler, webhookHandler, registry, adminAPI, onboardingAPI, sisfiAPI, database, redisClient, adminFS(), log, cfg.IsDevelopment())
 
 	log.Info("server starting", "port", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

@@ -13,6 +13,7 @@ type Repository interface {
 	GetProgram(ctx context.Context, customerID string) (*EarnBurnProgram, error)
 	GetProgramByID(ctx context.Context, customerSisfiID string) (*EarnBurnProgram, error)
 	ListPrograms(ctx context.Context, customerID string) ([]EarnBurnProgram, error)
+	CreateProgram(ctx context.Context, p *EarnBurnProgram) error
 	GetBalance(ctx context.Context, clientID, customerSisfiID string) (int, error)
 	UpsertBalance(ctx context.Context, clientID, customerSisfiID string, delta int) (int, error)
 	CreateTransaction(ctx context.Context, tx *Transaction) error
@@ -76,6 +77,39 @@ func (r *PostgresRepository) GetProgram(ctx context.Context, customerID string) 
 		return nil, fmt.Errorf("get program: %w", err)
 	}
 	return &p, nil
+}
+
+// CreateProgram activates earn_burn for a customer: inserts customer_sisfi link
+// and config_earnburn row in a single transaction. Sets p.CustomerSisfiID on success.
+func (r *PostgresRepository) CreateProgram(ctx context.Context, p *EarnBurnProgram) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var customerSisfiID string
+	if err := tx.QueryRowContext(ctx, `
+		INSERT INTO customer_sisfi (customer_id, sisfi_id, name)
+		VALUES ($1, 'earn_burn', $2)
+		RETURNING id
+	`, p.CustomerID, p.Name).Scan(&customerSisfiID); err != nil {
+		return fmt.Errorf("insert customer_sisfi: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO config_earnburn (customer_sisfi_id, points_ratio)
+		VALUES ($1, $2)
+	`, customerSisfiID, p.PointsRatio); err != nil {
+		return fmt.Errorf("insert config_earnburn: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	p.CustomerSisfiID = customerSisfiID
+	p.Active = true
+	return nil
 }
 
 func (r *PostgresRepository) GetProgramByID(ctx context.Context, customerSisfiID string) (*EarnBurnProgram, error) {
@@ -438,7 +472,7 @@ func (r *PostgresRepository) ListPrograms(ctx context.Context, customerID string
 		`SELECT cs.id, cs.customer_id, cs.name, ec.points_ratio, cs.active
 		 FROM customer_sisfi cs
 		 JOIN config_earnburn ec ON ec.customer_sisfi_id = cs.id
-		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'earn_burn'
+		 WHERE cs.customer_id = $1 AND cs.sisfi_id = 'earn_burn' AND cs.active = true
 		 ORDER BY cs.created_at`,
 		customerID)
 	if err != nil {

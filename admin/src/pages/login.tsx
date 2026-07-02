@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "sonner"
-import { OctagonX } from "lucide-react"
+import { OctagonX, Eye, EyeOff } from "lucide-react"
 import { loginAdmin, loginGoogle, setToken, getOnboarding } from "@/lib/api-client"
 
 export function LoginPage() {
@@ -15,6 +15,7 @@ export function LoginPage() {
   const navigate = useNavigate()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [shake, setShake] = useState(false)
@@ -83,8 +84,14 @@ export function LoginPage() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className={`w-full max-w-md transition-transform ${shake ? "animate-[shake_0.4s_ease-in-out]" : ""}`}>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
+      {/* Glass background: gradient + soft color blobs */}
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-br from-violet-100 via-sky-50 to-pink-100 dark:from-violet-950 dark:via-slate-950 dark:to-pink-950" />
+      <div className="pointer-events-none absolute -left-32 -top-32 -z-10 h-96 w-96 rounded-full bg-purple-400/40 blur-3xl dark:bg-purple-700/30" />
+      <div className="pointer-events-none absolute -bottom-32 -right-32 -z-10 h-96 w-96 rounded-full bg-sky-400/40 blur-3xl dark:bg-sky-700/30" />
+      <div className="pointer-events-none absolute left-1/3 top-1/2 -z-10 h-72 w-72 rounded-full bg-pink-400/30 blur-3xl dark:bg-pink-700/20" />
+
+      <Card className={`relative w-full max-w-md border-white/30 bg-white/40 shadow-2xl shadow-purple-500/10 backdrop-blur-2xl transition-transform dark:border-white/10 dark:bg-white/5 ${shake ? "animate-[shake_0.4s_ease-in-out]" : ""}`}>
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">Fidel Admin</CardTitle>
           <CardDescription>
@@ -121,7 +128,7 @@ export function LoginPage() {
                   <span className="w-full border-t" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card px-2 text-muted-foreground">o</span>
+                  <span className="bg-white/40 px-2 text-muted-foreground backdrop-blur-sm dark:bg-white/5">o</span>
                 </div>
               </div>
             </>
@@ -141,14 +148,25 @@ export function LoginPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Tu password"
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setError("") }}
-                className={error ? "border-destructive/50 focus-visible:ring-destructive/30" : ""}
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Tu password"
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError("") }}
+                  className={`pr-10 ${error ? "border-destructive/50 focus-visible:ring-destructive/30" : ""}`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={showPassword ? "Ocultar password" : "Mostrar password"}
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Verificando..." : "Iniciar sesion"}

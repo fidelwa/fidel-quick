@@ -2,8 +2,10 @@ package cashback
 
 import "time"
 
+// CashbackProgram is wire-serialized with `id` (mapped from the customer_sisfi
+// row id) so the frontend can use the same `id` field across all program types.
 type CashbackProgram struct {
-	CustomerSisfiID string  `json:"customer_sisfi_id"`
+	CustomerSisfiID string  `json:"id"`
 	CustomerID      string  `json:"customer_id"`
 	Name            string  `json:"name"`
 	CashbackRate    float64 `json:"cashback_rate"`

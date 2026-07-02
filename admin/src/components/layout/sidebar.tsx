@@ -6,18 +6,18 @@ import {
   Users,
   UserSearch,
   MessageSquare,
-  Stamp,
   LogOut,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/context/auth-context"
 import { Separator } from "@/components/ui/separator"
 
+// 'Tarjeta de sellos' no tiene su propia entrada — todos los sisfis se acceden
+// desde la página unificada `/programas` (FID-23).
 const navItems = [
   { to: "/", label: "Inicio", icon: Home },
   { to: "/perfil", label: "Mi Negocio", icon: Building2 },
   { to: "/programas", label: "Programas", icon: Trophy },
-  { to: "/pushcard", label: "Tarjeta de sellos", icon: Stamp },
   { to: "/colaboradores", label: "Colaboradores", icon: Users },
   { to: "/clientes", label: "Clientes", icon: UserSearch },
   { to: "/feedback", label: "Feedback", icon: MessageSquare },
@@ -27,9 +27,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { logout } = useAuth()
 
   return (
-    <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex h-14 items-center border-b px-4">
-        <span className="text-lg font-semibold">Fidel Admin</span>
+    <div className="glass-strong flex h-full flex-col rounded-none border-0 text-sidebar-foreground">
+      <div className="flex h-14 items-center border-b border-white/40 px-4">
+        <span className="text-lg font-semibold tracking-tight">Fidel Admin</span>
       </div>
       <nav className="flex-1 space-y-1 p-3">
         {navItems.map((item) => (
