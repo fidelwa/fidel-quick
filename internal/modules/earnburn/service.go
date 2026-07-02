@@ -513,6 +513,19 @@ func (s *Service) GetBalance(ctx context.Context, clientID, customerSisfiID stri
 	return s.repo.GetBalance(ctx, clientID, customerSisfiID)
 }
 
+// GetCustomerMetrics agrega y calcula las métricas T1 del dashboard para un customer.
+func (s *Service) GetCustomerMetrics(ctx context.Context, customerID string) (*CustomerMetrics, error) {
+	if customerID == "" {
+		return nil, apperror.BadRequest("customer_id requerido", nil)
+	}
+	raw, err := s.repo.GetMetricsRaw(ctx, customerID)
+	if err != nil {
+		return nil, apperror.Internal("error al calcular métricas", err)
+	}
+	metrics := ComputeMetrics(raw)
+	return &metrics, nil
+}
+
 // generateCode creates a random alphanumeric code.
 func generateCode(length int) string {
 	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no I, O, 0, 1

@@ -8,6 +8,7 @@ import type {
   CashbackReward,
   Client,
   Collaborator,
+  CustomerMetrics,
   FeedbackEntry,
   Transaction,
   CashbackTransaction,
@@ -176,6 +177,10 @@ export const updateCashbackReward = (programId: string, rewardId: string, data: 
 // Clients
 export const getClients = (customerId: string) =>
   request<Client[]>(`/customers/${customerId}/clients`)
+
+// Dashboard metrics (T1)
+export const getCustomerMetrics = (customerId: string) =>
+  request<CustomerMetrics>(`/customers/${customerId}/metrics`)
 
 // Collaborators
 export const getCollaborators = (customerId: string) =>

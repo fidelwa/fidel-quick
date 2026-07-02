@@ -106,6 +106,22 @@ export interface Collaborator {
   active: boolean
 }
 
+export interface CustomerMetrics {
+  registered_clients: number
+  active_clients: number
+  reactivated_clients: number
+  participation_rate: number
+  purchase_frequency: number
+  average_ticket: number
+  spend_per_client: number
+  total_spend: number
+  benefits_generated: number
+  benefits_redeemed: number
+  benefits_cost: number
+  potential_gain: number
+  redemption_rate: number
+}
+
 export interface FeedbackEntry {
   id: string
   message: string
